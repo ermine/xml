@@ -1,0 +1,22 @@
+.PHONY: testlib clean
+
+TESTS[] =
+   test1
+   test2
+   test3
+
+if $(not $(defined LIBDIR))
+   include ../../../config
+   export
+
+OCAMLINCLUDES += .. $(LIBDIR)
+
+foreach(name, $(TESTS))
+   OCAML_OTHER_LIBS = fstream ini_config conversion xml
+   OCamlProgram($(name), $(name))
+   $(name): $(addsuffix .ml, $(name))
+
+testlib: $(TESTS)
+
+clean:
+   $(CLEAN) $(TESTS)

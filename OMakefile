@@ -1,0 +1,68 @@
+.PHONY: makelib clean
+
+if $(not $(defined LIBDIR))
+   include ../../config
+   export
+
+OCAMLINCLUDES += $(LIBDIR)
+
+OCamlGeneratedFiles(xml_encode.ml xml_decode.ml)
+
+GENERATED_FILES[] =
+   xml_encode.ml
+   xml_decode.ml
+
+FILES[] =
+   encoding
+   uchar
+   xmlchar
+   xml_encode
+   xml_decode
+   xml
+   xmlparser
+   sax
+   sax_ns
+   dom
+   xml_light
+
+LIB = xml
+
+.DEFAULT: $(OCamlLibrary $(LIB), $(FILES))
+
+IFILES[] =
+   sax
+   sax_ns
+   dom
+   xml_light
+
+LibInstall(makelib, $(LIB), $(IFILES))
+
+OCamlGeneratedFiles(xpath_grammar.ml)
+
+GENERATED_FILES[] +=
+   xpath_grammar.ml
+
+section
+   USE_OCAMLFIND = true
+   OCAMLFINDFLAGS += -syntax camlp4o
+   OCAMLPACKS[] =
+      ulex
+   xpath_ulex.cmx xpath_ulex$(EXT_OBJ):
+   xpath_ulex.cmo:
+   xpath_ulex.cmi:
+
+FILES[] =
+   xpath
+   xpath_grammar
+   xpath_ulex
+LIB = xpath
+
+#section
+#   USE_OCAMLFIND = true
+#   OCAMLPACKS[] =
+#      ulex
+#   .DEFAULT: $(OCamlLibrary $(LIB), $(FILES))
+
+clean:
+   $(CLEAN) $(GENERATED_FILES)
+
