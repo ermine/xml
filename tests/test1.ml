@@ -41,8 +41,10 @@ let _ =
    let rec aux_cycle () =
       let buf = String.create 1024 in
       let size = input tin buf 0 1024 in
-	 if size = 0 then
-	    ()
+	 if size = 0 then (
+	    close_in tin;
+	    Xmlparser.finish p
+	 )
 	 else (
 	    Xmlparser.parse p buf 0 size;
 	    aux_cycle ()

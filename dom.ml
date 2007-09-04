@@ -72,96 +72,216 @@ let add_child stack newel =
 		 Stack.push el stack
             | _ -> ()
 
+
+let reparent refel node =
+   match refel with 
+      | Element (elemp, name, nss, attrs, children) ->
+           bind_child refel node;
+           (match node with
+	       | Attribute (p, name, value) ->
+		    attrs := node::!attrs;
+               | Text (p, str) ->
+		    children := node::!children;
+               | Element (p, name, nss, attrs, ch) ->
+		    children := node::!children;
+               | Comment (p, str) ->
+		    children := node::!children;
+               | ProcessingInstruction (p, pi, str) ->
+		    children := node::!children;
+               | NS (p, ns) -> 
+		    nss := node::!nss
+               | Root (nodes) -> 
+		    failwith 
+		       "Element node cannot have a root node in its children"
+	   )
+      | Root (oldnodes) ->
+	   bind_child refel node;
+	   (match node with
+		  Text (p, str) ->
+		     oldnodes := node::!oldnodes
+	       | Element (p, name, nss, attrs, ch) ->
+		    oldnodes := node::!oldnodes
+	       | Comment (p, str) ->
+		    oldnodes := node::!oldnodes
+	       | ProcessingInstruction (p, pi, str) ->
+		    oldnodes := node::!oldnodes
+	       | _ -> 
+		    failwith "Cannot make node a children of root"
+	   )
+      | _ -> 
+	   failwith "Node cannot be a parent of any other"
+
+let reparent_nodes refel nodes =
+   List.iter (reparent refel) (List.rev nodes)
+
 let create_dom ?(whitespace_preserve=false) 
       ~unknown_encoding_handler ~entity_handler 
       ~callback () =
 
    let namespaces = Hashtbl.create 1 in
-   let stack = Stack.create () in
    let root = Root(ref []) in
-   let () = Stack.push root stack in
-
    let parse_attributes = 
       List.map (fun (qname,value) -> Attribute (null_noderef (), qname, value))
    in
    let parse_namespaces = 
       List.map (fun map -> NS (null_noderef (), map))
    in
-   let new_element qname namespaces attributes =
+   let new_element qname namespaces attributes children =
       let el = Element (null_noderef (), 
 			qname, 
 			ref namespaces, 
 			ref attributes, 
-			ref [])
+			ref children)
       in
-	 match el with
-            | Element (newp, nname, nnss, nattrs, nch) -> 
-		 bind_children el !nnss;
-		 bind_children el !nattrs;
-		 bind_children el !nch;
-		 Stack.push el stack
-	    | _ -> ()
+	 (match el with
+             | Element (newp, nname, nnss, nattrs, nch) -> 
+		  bind_children el !nnss;
+		  bind_children el !nattrs;
+		  bind_children el !nch;
+	     | _ -> ()
+	 );
+	 el
    in
    let new_comment str =
-      let el = Comment (null_noderef (), str) in
-	 add_child stack el
+      Comment (null_noderef (), str)
    in
    let new_pi name str =
-      let el = ProcessingInstruction (null_noderef (), name, str) in
-	 add_child stack el
+      ProcessingInstruction (null_noderef (), name, str)
    in
    let new_text str =
-      let el = Text (null_noderef (), str) in
-	 add_child stack el
+      Text (null_noderef (), str)
    in
-
-   let next = function
-      | Xmlparser.Comment comment ->
-	   new_comment comment
-      | Xmlparser.Pi (target, data) ->
-	   new_pi target data
-      | Xmlparser.Whitespace str ->
-	   if whitespace_preserve then
-	      new_text str
-      | Xmlparser.Text str ->
-	   new_text str
-      | Xmlparser.StartElement (name, attrs) ->
-	   let lnss, attrs = split_attrs attrs in
-	      add_namespaces namespaces lnss;
-	      let attrs =  parse_attrs namespaces attrs in
-	      let qname = parse_qname namespaces (split_name name) in
-		 new_element qname 
+   let rec process_epiloque nodes tag fparser =
+      match tag with
+	 | Xmlparser.Comment comment ->
+	      let node = new_comment comment in
+		 fparser (process_epiloque (node :: nodes))
+	 | Xmlparser.Pi (target, data) ->
+	      let node = new_pi target data in
+		 fparser (process_epiloque (node :: nodes))
+	 | Xmlparser.Whitespace spaces ->
+	      if whitespace_preserve then
+		 let node = new_text spaces in
+		    fparser (process_epiloque (node :: nodes))
+	      else
+		 fparser (process_epiloque nodes)
+	 | Xmlparser.EOD ->
+	      reparent_nodes root (List.rev nodes);
+	      callback root
+	 | _ ->
+	      failwith "Invalid epiloque"
+   in
+   let rec get_node qname nodes nextf tag fparser =
+      match tag with
+	 | Xmlparser.Comment comment ->
+	      let node = new_comment comment in
+		 fparser (get_node qname (node :: nodes) nextf)
+	 | Xmlparser.Pi (target, data) ->
+	      let node = new_pi target data in
+		 fparser (get_node qname (node :: nodes) nextf)
+	 | Xmlparser.Whitespace spaces ->
+	      if whitespace_preserve then
+		 let node = new_text spaces  in
+		    fparser (get_node qname (node :: nodes) nextf)
+	      else
+		 fparser (get_node qname nodes nextf)
+	 | Xmlparser.Text str ->
+	      let node = new_text str in
+		 fparser (get_node qname (node :: nodes) nextf)
+	 | Xmlparser.StartElement (name, attrs) ->
+	      let lnss, attrs = split_attrs attrs in
+		 add_namespaces namespaces lnss;
+		 let attrs =  parse_attrs namespaces attrs in
+		 let qname' = parse_qname namespaces (split_name name) in
+		 let newnextf childs fparser =
+		    let node = new_element qname'
+		       (parse_namespaces lnss) 
+		       (parse_attributes attrs) 
+		       (List.rev childs)
+		    in
+		       remove_namespaces namespaces lnss;
+		       fparser (get_node qname (node :: nodes) nextf)
+		 in
+		    fparser (get_node qname' [] newnextf)
+	 | Xmlparser.EndElement name ->
+	      let qname' = parse_qname namespaces (split_name name) in
+		 if qname = qname' then
+		    nextf nodes fparser
+		 else 
+		    failwith (Printf.sprintf "Bad end tag: expected %s, was %s"
+				 (Xml.string_of_qname qname)
+				 (Xml.string_of_qname qname'))
+	 | Xmlparser.EmptyElement (name, attrs) ->
+	      let lnss, attrs = split_attrs attrs in
+		 add_namespaces namespaces lnss;
+		 let attrs =  parse_attrs namespaces attrs in
+		 let qname' = parse_qname namespaces (split_name name) in
+		 let node = new_element qname'
 		    (parse_namespaces lnss) 
-		    (parse_attributes attrs) 
-
-      | Xmlparser.EndElement name ->
-	   let el = Stack.pop stack in
-	      (match el with
-		  | Element (_p, qname, nss, _attrs, childs) ->
-		       let qname2 = parse_qname namespaces (split_name name) in
-			  if qname = qname2 then (
-			     childs := List.rev !childs;
-			     add_child stack el
-			  )
-			  else
-			     failwith "Strange end element";
-			  if Stack.length stack = 1 then
-			     let root = Stack.pop stack in
-				callback root
-		  | _ -> ()
- 	      )
-      | Xmlparser.Cdata cdata -> 
-	   new_text cdata
-      | Xmlparser.Doctype (qname, ext, str) -> 
-	   ()
-(*
-           failwith "Doctype declaration inside of element"
-*)
+		    (parse_attributes attrs)
+		    [] 
+		 in
+		    remove_namespaces namespaces lnss;
+		    fparser (get_node qname (node :: nodes) nextf)
+	 | Xmlparser.Cdata cdata -> 
+	      let node = new_text cdata in
+		 fparser (get_node qname (node :: nodes) nextf)
+	 | Xmlparser.Doctype (qname, ext, str) -> 
+              failwith "Doctype declaration inside of element"
+	 | Xmlparser.EOD ->
+	      failwith "Unexpected end of data"
    in
+   let rec process_prolog nodes tag fparser =
+      match tag with
+	 | Xmlparser.Comment comment ->
+	      let node = new_comment comment in
+		 fparser (process_prolog (node :: nodes))
+	 | Xmlparser.Doctype (name, ext_id, str) ->
+	      (* todo *)
+	      fparser (process_prolog nodes)
+	 | Xmlparser.StartElement (name, attrs) ->
+	      let lnss, attrs = split_attrs attrs in
+		 add_namespaces namespaces lnss;
+		 let attrs =  parse_attrs namespaces attrs in
+		 let qname = parse_qname namespaces (split_name name) in
+		 let newnextf childs fparser =
+		    let node = new_element qname 
+		       (parse_namespaces lnss) 
+		       (parse_attributes attrs) 
+		       (List.rev childs)
+		    in
+		       remove_namespaces namespaces lnss;
+		       fparser (process_epiloque (node :: nodes))
+		 in
+		    fparser (get_node qname [] newnextf)
+	 | Xmlparser.EmptyElement (name, attrs) ->
+	      let lnss, attrs = split_attrs attrs in
+		 add_namespaces namespaces lnss;
+		 let attrs =  parse_attrs namespaces attrs in
+		 let qname = parse_qname namespaces (split_name name) in
+		 let node = new_element qname 
+		    (parse_namespaces lnss) 
+		    (parse_attributes attrs)
+		    [] 
+		 in
+		    remove_namespaces namespaces lnss;
+		    fparser (process_epiloque (node :: nodes))
+	 | Xmlparser.Whitespace spaces ->
+	      if whitespace_preserve then
+		 let node = new_text spaces in
+		    fparser (process_prolog (node :: nodes))
+	      else
+		 fparser (process_prolog nodes)
+	 | Xmlparser.EOD ->
+	      failwith "Unexpected end of data"
+	 | _ ->
+	      failwith "Unexpected tag"
+   in      
       Xmlparser.create 
 	 ~process_unknown_encoding:unknown_encoding_handler
 	 ~process_entity:entity_handler
-	 ~process_production:next
+	 ~process_production:(process_prolog [])
 	    ()
 
 let parse = Xmlparser.parse
+let finish = Xmlparser.finish

@@ -57,48 +57,81 @@ let create
       () =
    let namespaces = Hashtbl.create 1 in
    let stack_ns = Stack.create () in
-   let process_production = function
-      | Pi (target, data) ->
-	   pi_handler target data;
-      | Comment comment ->
-	   comment_handler comment;
-      | Cdata cdata ->
-	   character_data_handler cdata;
-      | Text text ->
-	   character_data_handler text;
-      | Whitespace space ->
-	   if whitespace_preserve then
-	      character_data_handler space
-      | StartElement (name, attrs) ->
-	   let lnss, attrs = split_attrs attrs in
-	      add_namespaces namespaces lnss;
-	      let attrs =  parse_attrs namespaces attrs in
-	      let qname = parse_qname namespaces (split_name name) in
-		 Stack.push (qname, lnss) stack_ns;
-		 if lnss <> [] then
-		    List.iter start_ns_handler lnss;
-		 start_element_handler qname attrs;
-      | EndElement name ->
-	   let qname = 
-	      parse_qname namespaces (split_name name) in
-	      end_element_handler qname;
-	      let (name, lnss) = Stack.pop stack_ns in
-		 if qname = name then (
-		    if lnss <> [] then (
-		       List.iter end_ns_handler lnss;
-		       remove_namespaces namespaces lnss;
-		    )
-		 )
-		 else
-		    failwith "Bad end element"
-      | Doctype (name, ext, str) ->
-	   ()
-		       
+   let rec process_production tag fparser =
+      (match tag with
+	  | Pi (target, data) ->
+	       pi_handler target data;
+	  | Comment comment ->
+	       comment_handler comment;
+	  | Cdata cdata ->
+	       character_data_handler cdata;
+	  | Text text ->
+	       character_data_handler text;
+	  | Whitespace space ->
+	       if whitespace_preserve then
+		  character_data_handler space
+	  | StartElement (name, attrs) ->
+	       let lnss, attrs = split_attrs attrs in
+		  add_namespaces namespaces lnss;
+		  let attrs =  parse_attrs namespaces attrs in
+		  let qname = parse_qname namespaces (split_name name) in
+		     Stack.push (qname, lnss) stack_ns;
+		     List.iter start_ns_handler lnss;
+		     start_element_handler qname attrs;
+	  | EmptyElement (name, attrs) ->
+	       let lnss, attrs = split_attrs attrs in
+		  add_namespaces namespaces lnss;
+		  let attrs =  parse_attrs namespaces attrs in
+		  let qname = parse_qname namespaces (split_name name) in
+		     List.iter start_ns_handler lnss;
+		     start_element_handler qname attrs;
+		     end_element_handler qname;
+		     List.iter end_ns_handler lnss;
+		     remove_namespaces namespaces lnss
+	  | EndElement name ->
+	       let qname = 
+		  parse_qname namespaces (split_name name) in
+		  end_element_handler qname;
+		  let (name, lnss) = Stack.pop stack_ns in
+		     if qname = name then (
+			List.iter end_ns_handler lnss;
+			remove_namespaces namespaces lnss;
+		     )
+		     else
+			failwith (Printf.sprintf 
+				     "Bad end element: expected %s, was %s\n"
+				     (Xml.string_of_qname name)
+				     (Xml.string_of_qname qname));
+	  | Doctype (name, ext, str) ->
+	       failwith "Unexpected DOCTYPE"
+	  | EOD ->
+	       raise End_of_file
+      );
+      fparser process_production
    in
+   let rec process_prolog tag fparser =
+      match tag with
+	 | Comment comment ->
+	      comment_handler comment;
+	      fparser process_prolog
+	 | Doctype (name, ext_id, str) ->
+	      fparser process_prolog
+	 | StartElement _ ->
+	      process_production tag fparser
+	 | Whitespace space ->
+	      fparser process_prolog
+	 | EmptyElement (name, attrs) ->
+	      process_production tag fparser
+	 | EOD ->
+	      raise End_of_file
+	 | _ ->
+	      failwith "Unexpected tag"
+   in	      
       Xmlparser.create 
 	 ~process_unknown_encoding:unknown_encoding_handler
 	 ~process_entity:entity_handler
-	 ~process_production
+	 ~process_production:process_prolog
 	    ()
 
 let parse = Xmlparser.parse
+let finish = Xmlparser.finish

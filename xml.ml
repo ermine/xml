@@ -95,9 +95,9 @@ let rec serialize out = function
    | Text (parent, text) -> 
 	out (encode text)
    | Comment (parent, comment) -> 
-	out "<!-- ";
+	out "<!--";
 	out comment;
-	out " -->"
+	out "-->"
    | ProcessingInstruction (parent, target, pi) -> 
 	out "<?";
 	out target;

@@ -56,6 +56,7 @@ let _ =
       let size = input fin buf 0 70 in
 	 if size = 0 then (
 	    close_in fin;
+	    Sax_ns.finish p
 	 )
 	 else (
 	    Sax_ns.parse p buf 0 size;

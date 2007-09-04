@@ -1,10 +1,12 @@
-.PHONY: makelib clean
+.PHONY: makelib install clean
 
-if $(not $(defined LIBDIR))
-   include ../../config
-   export
+open ../../config
+
+.SUBDIRS: tests
 
 OCAMLINCLUDES += $(LIBDIR)
+
+OCAMLFLAGS += -rectypes
 
 OCamlGeneratedFiles(xml_encode.ml xml_decode.ml)
 
@@ -30,6 +32,7 @@ LIB = xml
 .DEFAULT: $(OCamlLibrary $(LIB), $(FILES))
 
 IFILES[] =
+   xmlparser
    sax
    sax_ns
    dom
@@ -62,6 +65,8 @@ LIB = xpath
 #   OCAMLPACKS[] =
 #      ulex
 #   .DEFAULT: $(OCamlLibrary $(LIB), $(FILES))
+
+install: makelib
 
 clean:
    $(CLEAN) $(GENERATED_FILES)

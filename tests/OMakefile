@@ -1,15 +1,15 @@
 .PHONY: testlib clean
 
+open ../../../config
+
 TESTS[] =
    test1
    test2
    test3
 
-if $(not $(defined LIBDIR))
-   include ../../../config
-   export
-
 OCAMLINCLUDES += .. $(LIBDIR)
+
+OCAMLFLAGS += -rectypes
 
 foreach(name, $(TESTS))
    OCAML_OTHER_LIBS = fstream ini_config conversion xml
