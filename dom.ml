@@ -53,7 +53,7 @@ let bind_child parent child =
       | NS (p, _) ->
            p := parent
       | Root (nodes) -> 
-	   raise (XMLError "Root node cannot be bound to any parent")
+	   raise (Xml.Error "Root node cannot be bound to any parent")
 
 let bind_children parent children =
   List.iter (bind_child parent) children;;
@@ -284,4 +284,6 @@ let create_dom ?(whitespace_preserve=false)
 	    ()
 
 let parse = Xmlparser.parse
+let set_callback = Xmlparser.set_callback
 let finish = Xmlparser.finish
+let reset = Xmlparser.reset

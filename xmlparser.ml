@@ -21,18 +21,22 @@ type production =
    | EOD
 (*   | EOB *)
 
+type cb = production -> ('a -> unit) -> unit as 'a
+
 type parser_t = {
    mutable encoding : string;
    mutable standalone : bool;
-
-   mutable fparser : parser_t -> char Stream.t -> bool -> unit;
+   mutable fparser : parser_t -> char Stream.t -> bool -> cb -> unit;
    mutable fencoder : int -> (int, char list) Fstream.t;
-   process_entity : string -> int;
+   mutable nextf :  cb;
+   entity_handler : string -> int;
+   encoding_handler : string -> (char -> (char, int) Fstream.t);
 }
 and lstream = | Lexer of (parser_t -> int -> lstream) 
-	      | Switch of 
-		   (char -> (char, int) Fstream.t) * (parser_t -> int -> lstream)
-	      | Token of production * (parser_t -> int -> lstream)
+		 | Switch of 
+		      (char -> (char, int) Fstream.t) * 
+			 (parser_t -> int -> lstream)
+		 | Token of production * (parser_t -> int -> lstream)
 
 let accept_if str f =
    let len = String.length str in
@@ -168,7 +172,7 @@ let parse_reference buf nextf state ucs4 =
 		    | "quot" -> Buffer.add_char buf '"'
 		    | "amp" -> Buffer.add_char buf '&'
 		    | other ->
-			 let ucs4 = state.process_entity other in
+			 let ucs4 = state.entity_handler other in
 			    fencoder state buf ucs4
 		);
 		Lexer nextf
@@ -572,7 +576,7 @@ let rec lexer state ucs4 =
 		      raise (LexerError "expected '<'"))
 	       state ucs4
 	    
-let process_xmldecl unknown_encoding attrs state =
+let process_xmldecl attrs state =
    let version = 
       try List.assoc "version" attrs with Not_found -> "" in
       if version <> "1.0" then
@@ -602,17 +606,16 @@ let process_xmldecl unknown_encoding attrs state =
 			| "UCS-4LE" ->
 			     Encoding.decode_ucs4le
 			| other ->
-			     unknown_encoding encoding
+			     state.encoding_handler encoding
 		  in
 		     Switch (fdecoder, lexer)
 
-let rec start_lexer unknown_encoding state ucs4 =
+let rec start_lexer state ucs4 =
    let opened_lt state ucs4 =
       if ucs4 = Uchar.u_slash then
 	 Lexer (parse_end_element (fun name -> Token (EndElement name, lexer)))
       else if ucs4 = Uchar.u_quest then
-	 parse_xmldecl 
-	    (fun attrs -> process_xmldecl unknown_encoding attrs state)
+	 parse_xmldecl (fun attrs -> process_xmldecl attrs state)
       else if ucs4 = Uchar.u_excl then
 	 Lexer (fun state c ->
 		   if ucs4 = Uchar.u_openbr then
@@ -671,88 +674,137 @@ let debug_tag = function
 	Printf.printf "EOD"
 *)
 
-let create ?encoding 
-      ~process_unknown_encoding
-      ~process_entity
-      ~process_production
-      () =
-   let rec fparser state strm finish fdecoder flexer nextf=
-      match Stream.peek strm with
-	 | Some ch ->
-	      Stream.junk strm;
-	      (match fdecoder ch with
-		  | F fdecoder ->
-		       fparser state strm finish fdecoder flexer nextf
-		  | R (ucs4, fdecoder) ->
-		       match flexer state ucs4 with
-			  | Lexer flexer ->
-			       fparser state strm finish fdecoder flexer nextf
-			  | Switch (fdecoder, flexer) ->
-			       fparser state strm finish fdecoder flexer nextf
-			  | Token (tag, flexer) ->
-			       nextf tag 
-				  (fparser state strm finish fdecoder flexer)
-	      )
-	 | None ->
-	      if finish then
-		 nextf EOD (fparser state strm finish fdecoder flexer)
-	      else
-		 state.fparser <- fun state strm finish -> 
+let rec fparser state strm finish fdecoder flexer nextf=
+   match Stream.peek strm with
+      | Some ch ->
+	   Stream.junk strm;
+	   (match fdecoder ch with
+	       | F fdecoder ->
 		    fparser state strm finish fdecoder flexer nextf
-   in
-   let encoding, fparser =
-      match encoding with
+	       | R (ucs4, fdecoder) ->
+		    match flexer state ucs4 with
+		       | Lexer flexer ->
+			    fparser state strm finish fdecoder flexer nextf
+		       | Switch (fdecoder, flexer) ->
+			    fparser state strm finish fdecoder flexer nextf
+		       | Token (tag, flexer) ->
+			    nextf tag 
+			       (fparser state strm finish fdecoder flexer)
+	   )
+      | None ->
+	   if finish then
+	      nextf EOD (fparser state strm finish fdecoder flexer)
+	   else (
+	      state.nextf <- nextf;
+	      state.fparser <- fun state strm finish -> 
+		 fparser state strm finish fdecoder flexer
+	   )
+   
+let prepare_fparser enc process_unknown_encoding =
+   match enc with
+      | "NONE" ->
+	   let autodetect state strm finish =
+	      let chs = Stream.npeek 4 strm in
+		 if List.length chs < 4 then
+		    raise TooFew;
+		 let chs = Array.of_list chs in
+		 let encoding, fdecoder = Encoding.autodetect_encoding 
+		    (Uchar.of_char chs.(0)) (Uchar.of_char chs.(1)) 
+		    (Uchar.of_char chs.(2)) (Uchar.of_char chs.(3))
+		 in
+		    state.encoding <- encoding;
+		    fparser state strm finish fdecoder start_lexer
+	   in
+	      autodetect
+      | "UTF-8" -> 
+	   (fun state strm finish ->
+	       fparser state strm finish Encoding.decode_utf8 start_lexer)
+      | "UTF-16" ->
+	   (fun state strm finish ->
+	       fparser state strm finish (Encoding.decode_utf16 Encoding.BE) 
+		  start_lexer)
+      | "ASCII" ->
+	   (fun state strm finish ->
+	       fparser state strm finish  Encoding.decode_ascii start_lexer)
+      | "LATIN1" ->
+	   (fun state strm finish ->
+	       fparser state strm finish Encoding.decode_latin1 start_lexer)
+      | "UCS-4" ->
+	   (fun state strm finish ->
+	       fparser state strm finish  Encoding.decode_ucs4 start_lexer)
+      | other ->
+	   failwith ("Unsupported encoding " ^ other)
+
+let create ?encoding 
+      ?process_unknown_encoding
+      ?process_entity
+      ?process_production
+      () =
+   let entity_handler =
+      match process_entity with
 	 | None ->
-	      let autodetect state strm finish =
-		 let chs = Stream.npeek 4 strm in
-		    if List.length chs < 4 then
-		       raise TooFew;
-		    let chs = Array.of_list chs in
-		    let encoding, fdecoder = Encoding.autodetect_encoding 
-		       (Uchar.of_char chs.(0)) (Uchar.of_char chs.(1)) 
-		       (Uchar.of_char chs.(2)) (Uchar.of_char chs.(3))
-		    in
-		       state.encoding <- encoding;
-		       fparser state strm finish fdecoder 
-			  (start_lexer process_unknown_encoding)
-			  process_production
-	      in
-		 "NONE", autodetect
+	      (fun name -> raise (LexerError ("Unknown entity name " ^ name)))
+	 | Some v ->
+	      v
+   in
+   let encoding_handler =
+      match process_unknown_encoding with
+	 | None ->
+	      (fun name -> raise (LexerError ("Unknown encoding " ^ name)))
+	 | Some v ->
+	      v
+   in
+   let enc = 
+      match encoding with
+	 | None -> "NONE"
 	 | Some e ->
-	      let encoding, fdecoder =
-		 match e with
-		    | Enc_UTF8 ->
-			 "UTF-8", Encoding.decode_utf8
-		    | Enc_UTF16 ->
-			 "UTF-16", Encoding.decode_utf16 Encoding.BE
-		    | Enc_ASCII ->
-			 "ASCII", Encoding.decode_ascii
-		    | Enc_Latin1 ->
-			 "LATIN1", Encoding.decode_latin1
-		    | Enc_UCS4 ->
-			 "UCS-4", Encoding.decode_ucs4
-	      in
-		 encoding, (fun state strm finish ->
-			       fparser state strm finish fdecoder 
-				  (start_lexer process_unknown_encoding)
-				  process_production)
+	      match e with
+		 | Enc_UTF8 ->
+		      "UTF-8"
+		 | Enc_UTF16 ->
+		      "UTF-16"
+		 | Enc_ASCII ->
+		      "ASCII"
+		 | Enc_Latin1 ->
+		      "LATIN1"
+		 | Enc_UCS4 ->
+		      "UCS-4"
+   in			 
+   let fparser = prepare_fparser enc encoding_handler in
+   let nextf =
+      match process_production with
+	 | None -> 
+	      let rec stub _tag f = f stub in stub
+	 | Some v ->
+	      v
    in
       {
-	 encoding = encoding;
+	 encoding = enc;
 	 standalone = true;
-
 	 fencoder = Encoding.encode_utf8;
 	 fparser = fparser;
-	 process_entity = process_entity;
+	 nextf = nextf;
+	 entity_handler = entity_handler;
+	 encoding_handler = encoding_handler
       }
+
+let set_callback state callback =
+   state.nextf <- callback
 
 let parse state ?(finish=false) str start len = 
    let strm = 
       Stream.from (fun c -> if c+start < len then Some str.[c+start] else None)
    in
-      state.fparser state strm finish
+      state.fparser state strm finish state.nextf
 
 let finish state =
    let strm = Stream.of_string "" in
-      state.fparser state strm true
+      state.fparser state strm true state.nextf
 	 
+let reset state process_production =
+   let fparser = prepare_fparser state.encoding state.encoding_handler in
+      state.nextf <- process_production;
+      state.fparser <- fparser
+
+let decode = Xml_decode.decode
+let encode = Xml_encode.encode

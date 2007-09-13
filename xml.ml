@@ -1,4 +1,4 @@
-exception XMLError of string
+exception Error of string
 
 type namespace = [
 | `URI of string
@@ -14,6 +14,8 @@ type ns_mapping = prefix * namespace
 type qname = ns_mapping * ncname
 
 type cdata = string
+
+type attribute = qname * cdata
 
 type external_id = [ `System of string | `Public of string * string ]
 
@@ -37,14 +39,21 @@ type node =
    | ProcessingInstruction of node ref * ncname * cdata
 and nodeset = node list
 
+let xml_ns = ("xml", `URI "http://www.w3.org/XML/1998/namespace")
 let default_ns = ("", `None)
 
-let decode = Xml_decode.decode
 let encode = Xml_encode.encode
+let decode = Xml_decode.decode
 
 let string_of_qname = function
-   | (ns, localpart) when ns = default_ns -> localpart
-   | ((prefix, uri), localpart) -> prefix ^ ":" ^ localpart
+   | (("", _), lname) -> lname
+   | ((prefix, _), lname) -> prefix ^ ":" ^ lname
+
+let equal_qname qname1 qname2 =
+   match qname1, qname2 with
+      | ((_, ns1), name1), ((_, ns2), name2) when ns1 = ns2 && name1 = name2 ->
+	   true
+      | _ -> false
 
 let string_of_list f sep list =
    match list with 
@@ -55,7 +64,7 @@ let string_of_list f sep list =
 let string_of_attr : node -> string = function
    | Attribute (_parent, qname, value) ->
 	(string_of_qname qname) ^ "='" ^ encode value ^ "'"
-   | _ -> raise (XMLError "node is not an attribute in string_of_attr")
+   | _ -> raise (Error "node is not an attribute in string_of_attr")
 
 let string_of_ns = function
    | NS (p, (prefix, ns)) -> 

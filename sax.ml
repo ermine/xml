@@ -64,4 +64,6 @@ let create
 	    ()
 
 let parse = Xmlparser.parse
+let set_callback = Xmlparser.set_callback
 let finish = Xmlparser.finish
+let reset = Xmlparser.reset
