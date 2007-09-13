@@ -1,20 +1,6 @@
 open Xml
 open Xmlparser
 
-let split_name name =
-   if String.contains name ':' then
-      let idx = String.index name ':' in
-      let prefix = String.sub name 0 idx in
-      let lname = 
-	 if idx+1 > String.length name then
-	    ""
-	 else
-	    String.sub name (idx+1) (String.length name - (idx+1))
-      in
-	 prefix, lname
-   else
-      "", name
-
 let split_attrs attrs =
    List.fold_left (fun (nss, attrs) (name, value) ->
 		      let prefix, lname = split_name name in

@@ -1,22 +1,8 @@
 open Xml
 
-let split_name name =
-   if String.contains name ':' then
-      let idx = String.index name ':' in
-      let prefix = String.sub name 0 idx in
-      let lname = 
-	 if idx+1 > String.length name then
-	    ""
-	 else
-	    String.sub name (idx+1) (String.length name - (idx+1))
-      in
-	 prefix, lname
-   else
-      "", name
-
 let split_attrs attrs =
    List.fold_left (fun (nss, attrs) (name, value) ->
-		      let prefix, lname = split_name name in
+		      let prefix, lname = Xmlparser.split_name name in
 			 if prefix = "" && lname = "xmlns" then
 			    (("", `URI value) :: nss), attrs
 			 else if prefix = "xmlns" && lname <> "" then
@@ -192,7 +178,8 @@ let create_dom ?(whitespace_preserve=false)
 	      let lnss, attrs = split_attrs attrs in
 		 add_namespaces namespaces lnss;
 		 let attrs =  parse_attrs namespaces attrs in
-		 let qname' = parse_qname namespaces (split_name name) in
+		 let qname' = parse_qname namespaces 
+		    (Xmlparser.split_name name) in
 		 let newnextf childs fparser =
 		    let node = new_element qname'
 		       (parse_namespaces lnss) 
@@ -204,7 +191,8 @@ let create_dom ?(whitespace_preserve=false)
 		 in
 		    fparser (get_node qname' [] newnextf)
 	 | Xmlparser.EndElement name ->
-	      let qname' = parse_qname namespaces (split_name name) in
+	      let qname' = parse_qname namespaces 
+		 (Xmlparser.split_name name) in
 		 if qname = qname' then
 		    nextf nodes fparser
 		 else 
@@ -215,7 +203,8 @@ let create_dom ?(whitespace_preserve=false)
 	      let lnss, attrs = split_attrs attrs in
 		 add_namespaces namespaces lnss;
 		 let attrs =  parse_attrs namespaces attrs in
-		 let qname' = parse_qname namespaces (split_name name) in
+		 let qname' = parse_qname namespaces 
+		    (Xmlparser.split_name name) in
 		 let node = new_element qname'
 		    (parse_namespaces lnss) 
 		    (parse_attributes attrs)
@@ -243,7 +232,8 @@ let create_dom ?(whitespace_preserve=false)
 	      let lnss, attrs = split_attrs attrs in
 		 add_namespaces namespaces lnss;
 		 let attrs =  parse_attrs namespaces attrs in
-		 let qname = parse_qname namespaces (split_name name) in
+		 let qname = parse_qname namespaces 
+		    (Xmlparser.split_name name) in
 		 let newnextf childs fparser =
 		    let node = new_element qname 
 		       (parse_namespaces lnss) 
@@ -258,7 +248,8 @@ let create_dom ?(whitespace_preserve=false)
 	      let lnss, attrs = split_attrs attrs in
 		 add_namespaces namespaces lnss;
 		 let attrs =  parse_attrs namespaces attrs in
-		 let qname = parse_qname namespaces (split_name name) in
+		 let qname = parse_qname namespaces 
+		    (Xmlparser.split_name name) in
 		 let node = new_element qname 
 		    (parse_namespaces lnss) 
 		    (parse_attributes attrs)
