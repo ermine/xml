@@ -17,9 +17,9 @@ type cb = production -> ('a -> unit) -> unit as 'a
 
 type parser_t = {
   mutable encoding : string;
-  mutable standalone : bool;
-  mutable fparser : parser_t -> char Stream.t -> bool -> cb -> unit;
+  mutable fparser : parser_t -> cb -> unit;
   mutable fencoder : int -> (int, char list) Fstream.t;
+  mutable strm : char Stream.t;
   mutable nextf : cb;
   entity_handler : string -> int;
   encoding_handler : string -> char -> (char, int) Fstream.t;
@@ -37,11 +37,13 @@ val create :
 
 val set_callback : parser_t -> cb -> unit
 
-val parse : parser_t -> ?finish:bool -> string -> int -> int -> unit
+val parse : parser_t -> string -> int -> int -> unit
 
 val finish : parser_t -> unit
 
 val reset : parser_t -> cb -> unit
+
+val get_rest_buffer : parser_t -> string
 
 val decode : string -> string
 

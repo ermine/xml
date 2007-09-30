@@ -25,9 +25,9 @@ type cb = production -> ('a -> unit) -> unit as 'a
 
 type parser_t = {
    mutable encoding : string;
-   mutable standalone : bool;
-   mutable fparser : parser_t -> char Stream.t -> bool -> cb -> unit;
+   mutable fparser : parser_t -> cb -> unit;
    mutable fencoder : int -> (int, char list) Fstream.t;
+   mutable strm : char Stream.t;
    mutable nextf :  cb;
    entity_handler : string -> int;
    encoding_handler : string -> (char -> (char, int) Fstream.t);
@@ -674,37 +674,32 @@ let debug_tag = function
 	Printf.printf "EOD"
 *)
 
-let rec fparser state strm finish fdecoder flexer nextf=
-   match Stream.peek strm with
+let rec fparser state fdecoder flexer nextf=
+   match Stream.peek state.strm with
       | Some ch ->
-	   Stream.junk strm;
+	   Stream.junk state.strm;
 	   (match fdecoder ch with
 	       | F fdecoder ->
-		    fparser state strm finish fdecoder flexer nextf
+		    fparser state fdecoder flexer nextf
 	       | R (ucs4, fdecoder) ->
 		    match flexer state ucs4 with
 		       | Lexer flexer ->
-			    fparser state strm finish fdecoder flexer nextf
+			    fparser state fdecoder flexer nextf
 		       | Switch (fdecoder, flexer) ->
-			    fparser state strm finish fdecoder flexer nextf
+			    fparser state fdecoder flexer nextf
 		       | Token (tag, flexer) ->
 			    nextf tag 
-			       (fparser state strm finish fdecoder flexer)
+			       (fparser state fdecoder flexer)
 	   )
       | None ->
-	   if finish then
-	      nextf EOD (fparser state strm finish fdecoder flexer)
-	   else (
-	      state.nextf <- nextf;
-	      state.fparser <- fun state strm finish -> 
-		 fparser state strm finish fdecoder flexer
-	   )
+	   state.nextf <- nextf;
+	   state.fparser <- fun state -> fparser state fdecoder flexer
    
 let prepare_fparser enc process_unknown_encoding =
    match enc with
       | "NONE" ->
-	   let autodetect state strm finish =
-	      let chs = Stream.npeek 4 strm in
+	   let autodetect state =
+	      let chs = Stream.npeek 4 state.strm in
 		 if List.length chs < 4 then
 		    raise TooFew;
 		 let chs = Array.of_list chs in
@@ -713,25 +708,20 @@ let prepare_fparser enc process_unknown_encoding =
 		    (Uchar.of_char chs.(2)) (Uchar.of_char chs.(3))
 		 in
 		    state.encoding <- encoding;
-		    fparser state strm finish fdecoder start_lexer
+		    fparser state fdecoder start_lexer
 	   in
 	      autodetect
       | "UTF-8" -> 
-	   (fun state strm finish ->
-	       fparser state strm finish Encoding.decode_utf8 start_lexer)
+	   (fun state -> fparser state Encoding.decode_utf8 start_lexer)
       | "UTF-16" ->
-	   (fun state strm finish ->
-	       fparser state strm finish (Encoding.decode_utf16 Encoding.BE) 
-		  start_lexer)
+	   (fun state ->
+	       fparser state (Encoding.decode_utf16 Encoding.BE) start_lexer)
       | "ASCII" ->
-	   (fun state strm finish ->
-	       fparser state strm finish  Encoding.decode_ascii start_lexer)
+	   (fun state -> fparser state  Encoding.decode_ascii start_lexer)
       | "LATIN1" ->
-	   (fun state strm finish ->
-	       fparser state strm finish Encoding.decode_latin1 start_lexer)
+	   (fun state -> fparser state Encoding.decode_latin1 start_lexer)
       | "UCS-4" ->
-	   (fun state strm finish ->
-	       fparser state strm finish  Encoding.decode_ucs4 start_lexer)
+	   (fun state -> fparser state  Encoding.decode_ucs4 start_lexer)
       | other ->
 	   failwith ("Unsupported encoding " ^ other)
 
@@ -780,9 +770,9 @@ let create ?encoding
    in
       {
 	 encoding = enc;
-	 standalone = true;
 	 fencoder = Encoding.encode_utf8;
 	 fparser = fparser;
+	 strm = Stream.of_string "";
 	 nextf = nextf;
 	 entity_handler = entity_handler;
 	 encoding_handler = encoding_handler
@@ -791,20 +781,31 @@ let create ?encoding
 let set_callback state callback =
    state.nextf <- callback
 
-let parse state ?(finish=false) str start len = 
+let parse state str start len = 
    let strm = 
       Stream.from (fun c -> if c+start < len then Some str.[c+start] else None)
    in
-      state.fparser state strm finish state.nextf
+      state.strm <- strm;
+      state.fparser state state.nextf
 
 let finish state =
+   state.nextf EOD (fun _ -> failwith "XML Parser finished")
+
+(*
    let strm = Stream.of_string "" in
-      state.fparser state strm true state.nextf
+      state.strm <- strm;
+      state.fparser state true state.nextf
+*)
 	 
 let reset state process_production =
    let fparser = prepare_fparser state.encoding state.encoding_handler in
       state.nextf <- process_production;
       state.fparser <- fparser
+
+let get_rest_buffer state =
+   let buf = Buffer.create 9216 in
+      Stream.iter (Buffer.add_char buf) state.strm;
+      Buffer.contents buf
 
 let decode = Xml_decode.decode
 let encode = Xml_encode.encode
