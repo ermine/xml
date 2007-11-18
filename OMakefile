@@ -25,20 +25,23 @@ FILES[] =
    sax
    sax_ns
    dom
-   xml_light
-
+   light_xml
+   
 LIB = xml
 
 .DEFAULT: $(OCamlLibrary $(LIB), $(FILES))
 
 IFILES[] =
+   xml
    xmlparser
    sax
    sax_ns
    dom
-   xml_light
+   light_xml
 
-LibInstall(makelib, $(LIB), $(IFILES))
+ALIBS[] =
+
+LibInstall(makelib, $(LIB), $(IFILES), $(ALIBS))
 
 OCamlGeneratedFiles(xpath_grammar.ml)
 
