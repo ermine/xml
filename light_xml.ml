@@ -273,8 +273,19 @@ let process_production callback =
    in
       process_prolog
 
-let parse_document buf callback =
+
+let create_parser ?unknown_encoding_handler callback =
+   Xmlparser.create 
+      ?process_unknown_encoding:unknown_encoding_handler
+      ~process_production:(process_production callback) ()
+
+let parse = Xmlparser.parse
+
+let finish = Xmlparser.finish
+
+let parse_document ?unknown_encoding_handler buf callback =
    let p = Xmlparser.create 
+      ?process_unknown_encoding:unknown_encoding_handler
       ~process_production:(process_production callback) () in
       Xmlparser.parse p buf 0 (String.length buf);
       Xmlparser.finish p

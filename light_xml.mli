@@ -90,4 +90,14 @@ val parse_element_head :
 val process_production :
   (element -> 'a) -> (Xmlparser.production -> ('b -> 'a) -> 'a as 'b)
 
-val parse_document : string -> (element -> unit) -> unit
+val create_parser :
+  ?unknown_encoding_handler:(string -> char -> (char, int) Fstream.t) ->
+  (element -> unit) -> Xmlparser.parser_t
+
+val parse : Xmlparser.parser_t -> string -> int -> int -> unit
+
+val finish : Xmlparser.parser_t -> unit
+
+val parse_document : 
+  ?unknown_encoding_handler:(string -> char -> (char, int) Fstream.t) ->
+  string -> (element -> unit) -> unit
