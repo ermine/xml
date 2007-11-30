@@ -113,6 +113,19 @@ let rec decode_utf8 c0 =
 		)
 	 | _ -> assert false   
 	   
+let uarray_of_utf8_string str =
+   let rec aux_decode acc f i =
+      if i < String.length str then
+	 match f str.[i] with
+	    | R (b, f) ->
+		 aux_decode (b::acc) f (i+1)
+	    | F f ->
+		 aux_decode acc f (i+1)
+      else
+	 Array.of_list (List.rev acc)
+   in
+      aux_decode [] decode_utf8 0
+
 let rec encode_utf8 ucs4 =
    let bytes = 
       if ucs4 < 0x80 then
@@ -160,8 +173,8 @@ let read2 bo f =
             and b2 = Char.code c2 in
             let ucs4 =
                match bo with
-                  | BE -> (b1  lsl 8) + b2
-                  | LE -> (b2 lsl 8) + b1
+                  | BE -> (b1 lsl 8) + b2
+                  | LE -> b1 + (b2 lsl 8)
             in
                f ucs4
         )
@@ -181,9 +194,9 @@ let rec decode_utf16 bo =
 	 | 0xfeff -> F (decode_utf16 BE)
 	 | 0xfffe -> F (decode_utf16 LE)
 	 | _ ->
-	      if ucs4 < 0xd800 || 0xdfff < ucs4 then 
+	      if ucs4 < 0xd800 || 0xdfff < ucs4 then (
 		 R (ucs4, decode_utf16 bo)
-	      else if ucs4 <= 0xdbff then
+	      ) else if ucs4 <= 0xdbff then
 		 let f2 ucs42 =
 		    if ucs42 < 0xdc00 || ucs42 > 0xdfff then
 		       raise Illegal;
@@ -306,7 +319,7 @@ let autodetect_encoding b0 b1 b2 b3 =
 		 
       | 0xFF, 0xFE, _, _  ->
 	   (* UTF-16, little-endian *)
-	   "UTF-16LE", decode_utf16 LE
+	   "UTF-16", decode_utf16 BE
 		 
       | 0xEF, 0xBB, 0xBF, _ ->
 	   (* UTF-8 *)
@@ -332,7 +345,7 @@ let autodetect_encoding b0 b1 b2 b3 =
 	   "UTF-16", decode_utf16 BE
 		 
       | 0x3C, 0x00, 0x3F, 0x00 ->
-	   "UTF-16LE", decode_utf16 LE
+	   "UTF-16", decode_utf16 LE
 		 
       | 0x3C, 0x3F, 0x78, 0x6D ->
 	   "UTF-8", decode_utf8

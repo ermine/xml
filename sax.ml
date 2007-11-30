@@ -1,3 +1,7 @@
+(*
+ * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ *)
+
 open Xml
 
 open Xmlparser
@@ -52,10 +56,19 @@ let create
 	 | Whitespace space ->
 	      fparser process_prolog
 	 | EmptyElement (name, attrs) ->
-	       start_element_handler name attrs;
+	      start_element_handler name attrs;
 	      end_element_handler name
-	 | _ ->
-	      failwith "Unexpected tag"
+	 | Pi (target, data) ->
+	      pi_handler target data;
+	      fparser process_prolog
+	 | EndElement tag ->
+	      failwith ("Unexpected </" ^ tag ^ ">")
+	 | Cdata _ ->
+	      failwith "Unexpected cdata"
+	 | Text _ ->
+	      failwith "Unexpected text"
+	 | EOD ->
+	      failwith "Unexpected EOD"
    in
       Xmlparser.create 
 	 ~process_unknown_encoding:unknown_encoding_handler

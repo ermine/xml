@@ -101,6 +101,9 @@ let create
 	      fparser process_prolog
 	 | Doctype (name, ext_id, str) ->
 	      fparser process_prolog
+	 | Pi (target, data) ->
+	      pi_handler target data;
+	      fparser process_prolog
 	 | StartElement _ ->
 	      process_production tag fparser
 	 | Whitespace space ->
