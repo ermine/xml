@@ -1,3 +1,7 @@
+(*
+ * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ *)
+
 open Conversion
 open Sax
 

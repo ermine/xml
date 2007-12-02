@@ -1,10 +1,14 @@
+(*
+ * (c) 2007 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ *)
+
 open Printf
 open Xml
 
-let start_ns_handler (prefix, ns) 
-=   printf "NS start %s %s\n" prefix (match ns with
-					 | `URI uri -> "URI " ^ uri
-					 | `None -> "None"
+let start_ns_handler (prefix, ns) =
+   printf "NS start %s %s\n" prefix (match ns with
+					| `URI uri -> "URI " ^ uri
+					| `None -> "None"
 				    )
 
 let end_ns_handler (prefix, ns) =

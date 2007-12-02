@@ -1,3 +1,7 @@
+(*
+ * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ *)
+
 open Light_xml
 
 let unknown_encoding_handler encoding =

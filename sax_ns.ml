@@ -1,5 +1,11 @@
+(*
+ * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ *)
+
 open Xml
 open Xmlparser
+
+exception Error of string
 
 let split_attrs attrs =
    List.fold_left (fun (nss, attrs) (name, value) ->
@@ -83,10 +89,11 @@ let create
 			remove_namespaces namespaces lnss;
 		     )
 		     else
-			failwith (Printf.sprintf 
-				     "Bad end element: expected %s, was %s\n"
-				     (Xml.string_of_qname name)
-				     (Xml.string_of_qname qname));
+			raise (Error (
+				  (Printf.sprintf 
+				      "Bad end element: expected %s, was %s\n"
+				      (Xml.string_of_qname name)
+				      (Xml.string_of_qname qname))));
 	  | Doctype (name, ext, str) ->
 	       failwith "Unexpected DOCTYPE"
 	  | EOD ->

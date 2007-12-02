@@ -1,5 +1,5 @@
 (*
- * (c) 2007 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 open Fstream
@@ -101,6 +101,11 @@ let parse_qname nextf state ucs4 =
 		) state ucs4
 *)
 
+(*
+ * [5] Name     ::= (Letter | '_' | ':') (NameChar)*
+ * [4] NameChar ::= Letter | Digit | '.' | '-' | '_' | ':' | CombiningChar |
+ *                  Extender
+ *)
 let parse_name nextf state ucs4 =
    let buf = Buffer.create 30 in
    let rec get_name state ucs4 =
@@ -271,7 +276,7 @@ let parse_comment nextf state ucs4 =
       raise (LexerError "Malformed cooment")
 
 let parse_string nextf state ucs4 =
-   if ucs4 = Uchar.of_char '"' || ucs4 = Uchar.of_char '\'' then
+   if ucs4 = Uchar.u_quot || ucs4 = Uchar.u_apos then
       let buf = Buffer.create 30 in
       let rec get_text qt state ucs4 =
 	 if ucs4 = qt then
@@ -311,7 +316,7 @@ let parse_doctype nextf =
       (skip_blank 
 	  (fun state ucs4 ->
 	      parse_name (fun name state ucs4 ->
-			     if ucs4 = Uchar.of_char '>' then
+			     if ucs4 = Uchar.u_gt then
 				nextf name None ""
 			     else if Xmlchar.is_blank ucs4 then
 				Lexer (skip_blank (parse_external_id
@@ -319,7 +324,7 @@ let parse_doctype nextf =
 					  (fun state ucs4 ->
 					      let buf = Buffer.create 30 in
 					      let rec get_text state ucs4 =
-						 if ucs4 = Uchar.of_char '>' then
+						 if ucs4 = Uchar.u_gt then
 						    let text = 
 						       Buffer.contents buf in
 						       Buffer.clear buf;
@@ -340,7 +345,7 @@ let parse_doctype nextf =
 	 
 (* Attribute Value *)
 (*  Implements also (partially) 3.3.3 Attribute-Value Normalization *)
-let parse_attrvalue nextf =
+let parse_attrvalue nextf state ucs4 =
    let buf = Buffer.create 30 in
    let rec get_value qt state ucs4 =
       if ucs4 = qt then
@@ -358,15 +363,29 @@ let parse_attrvalue nextf =
 	 Lexer (get_value qt)
       )
    in
-      Lexer (fun state ucs4 ->
-		if ucs4 = Uchar.u_apos || ucs4 = Uchar.u_quot then
-		   Lexer (get_value ucs4)
-		else
-		   raise (LexerError "malformed attribute value")
-	    )
+      if ucs4 = Uchar.u_apos || ucs4 = Uchar.u_quot then
+	 Lexer (get_value ucs4)
+      else (
+	 Printf.printf "expected '\', was %d\n" ucs4;
+	 raise (LexerError "malformed attribute value")
+      )
 
 (*
- * [41] Attribute ::= Name Eq AttValue
+ * [25] Eq          ::= S? '=' S?
+ *)
+let parse_eq nextf state ucs4 =
+   skip_blank (fun state ucs4 ->
+		  if ucs4 = Uchar.u_eq then
+		     Lexer (skip_blank nextf)
+		  else
+		     raise (LexerError "Expected '='")
+	      ) state ucs4
+
+(*
+ * [41] Attribute   ::= Name Eq AttValue
+ * [25] Eq          ::= S? '=' S?
+ * [10] AttValue    ::= '"' ([^<&"] | Reference)* '"' 
+ *                      | "'" ([^<&'] | Reference)* "'"
  *)
 let rec parse_attributes tag attrs nextf state ucs4 =
    if ucs4 = Uchar.u_gt then
@@ -391,22 +410,25 @@ let rec parse_attributes tag attrs nextf state ucs4 =
 		  )
 	 else 
 	    parse_name
-	       (fun name state ucs4 ->
-		   if ucs4 = Uchar.u_eq then
-		      parse_attrvalue
-			 (fun value state ucs4 ->
-			     parse_attributes tag 
-				((name, value) :: attrs) nextf state ucs4
-			 )
-		   else
-		      raise (LexerError "expected =")
+	       (fun name ->
+		   parse_eq (parse_attrvalue
+				(fun value ->
+				    parse_attributes tag 
+				       ((name, value) :: attrs) nextf
+				))
 	       ) state ucs4
       in
 	 after_blank smth state ucs4
 
+(*
+ * [40] STag      ::= '<' Name (S Attribute)* S? '>'
+ *)
 let parse_start_element nextf state ucs4 =
    parse_name (fun name -> parse_attributes name [] nextf) state ucs4
 
+(*
+ * [42] ETag ::= '</' Name S? '>
+ *)
 let parse_end_element nextf state ucs4 =
    parse_name
       (fun name ->
@@ -417,34 +439,47 @@ let parse_end_element nextf state ucs4 =
 			    raise (LexerError "bad closing tag")
 		     )) state ucs4
 	 
+(*
+ * [18] CDSect  ::= CDStart CData CDEnd
+ * [19] CDStart ::= '<![CDATA['
+ * [20] CData   ::= (Char* - (Char* ']]>' Char* ))
+ * [21] CDEnd   ::= ']]>'
+*)
 let parse_cdata nextf =
    let buf = Buffer.create 30 in
-      accept_if "CDATA["
-	 (fun state ucs4 ->
-	     let rec get_cdata state ch1 =
-		if ch1 = Uchar.of_char ']' then
-		   Lexer (fun state ch2 ->
-			     if ch2 = Uchar.of_char ']' then
-				Lexer (fun state ch3 ->
-					  if ch3 = Uchar.of_char '>' then
-					     let cdata = Buffer.contents buf in
-						Buffer.clear buf;
-						nextf cdata
-					  else
-					     raise (LexerError "expected ']]>'"))
-			     else (
-				fencoder state buf ch1;
-				fencoder state buf ch2;
-				Lexer get_cdata
-			     )
+   let rec get_cdata state ch1 =
+      if ch1 = Uchar.u_closebr then
+	 Lexer (fun state ch2 ->
+		   if ch2 = Uchar.u_closebr then
+		      let rec aux_tail state ucs4 =
+			 if ucs4 = Uchar.u_gt then
+			    let cdata = Buffer.contents buf in
+			       Buffer.reset buf;
+			       nextf cdata
+			 else if ucs4 = Uchar.u_closebr then (
+			    fencoder state buf Uchar.u_closebr;
+			    Lexer aux_tail
+			 )   
+			 else (
+			    fencoder state buf Uchar.u_closebr;
+			    fencoder state buf Uchar.u_closebr;
+			    fencoder state buf ucs4;
+			    Lexer get_cdata
 			 )
-		else (
-		   fencoder state buf ch1;
-		   Lexer get_cdata
-		)
-	     in
-		get_cdata state ucs4
-	 )
+		      in
+			 Lexer aux_tail
+		   else (
+		      fencoder state buf ch1;
+		      fencoder state buf ch2;
+		      Lexer get_cdata
+		   )
+	       )
+      else (
+	 fencoder state buf ch1;
+	 Lexer get_cdata
+      )
+   in
+      accept_if "CDATA[" (fun state ucs4 -> get_cdata state ucs4)
 	 
 let parse_pi nextf state ucs4 =
    parse_name 
