@@ -1,3 +1,7 @@
+(*
+ * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ *)
+
 exception Error of string
 
 type namespace = [

@@ -1,3 +1,7 @@
+(*
+ * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ *)
+
 exception LexerError of string
 exception UnknownEntity of string
 
@@ -30,7 +34,7 @@ and lstream =
   | Token of production * (parser_t -> int -> lstream)
 
 val create :
-  ?encoding:Encoding.encoding ->
+  ?encoding:Xmlencoding.encoding ->
   ?process_unknown_encoding:(string -> char -> (char, int) Fstream.t) ->
   ?process_entity:(string -> int) ->
   ?process_production:cb -> unit -> parser_t

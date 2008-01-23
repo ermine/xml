@@ -1,6 +1,5 @@
-      
 (*
- * (c) 2007 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 (* any Unicode character, excluding the surrogate blocks, FFFE, and FFFF. *)

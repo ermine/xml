@@ -1,9 +1,9 @@
 (*
- * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 open Fstream
-open Encoding
+open Xmlencoding
 
 exception LexerError of string
 exception UnknownEntity of string
@@ -646,19 +646,19 @@ let process_xmldecl attrs state =
 		  let fdecoder =
 		     match up with
 			| "ASCII" | "US-ASCII" ->
-			     Encoding.decode_ascii
+			     Xmlencoding.decode_ascii
 			| "LATIN1" | "ISO-8859-1" ->
-			     Encoding.decode_latin1
+			     Xmlencoding.decode_latin1
 			| "UTF-8" ->
-			     Encoding.decode_utf8
+			     Xmlencoding.decode_utf8
 			| "UTF-16" | "UTF-16BE" ->
-			     Encoding.decode_utf16 BE
+			     Xmlencoding.decode_utf16 BE
 			| "UTF-16LE" ->
-			     Encoding.decode_utf16 BE
+			     Xmlencoding.decode_utf16 BE
 			| "UCS-4" | "UCS-4BE" ->
-			     Encoding.decode_ucs4
+			     Xmlencoding.decode_ucs4
 			| "UCS-4LE" ->
-			     Encoding.decode_ucs4le
+			     Xmlencoding.decode_ucs4le
 			| other ->
 			     state.encoding_handler encoding
 		  in
@@ -742,6 +742,7 @@ let debug_tag = function
  * \r\n -> \n
  * \r -> \n
  *)
+
 let rec norm_nl ucs4 =
    if ucs4 = Uchar.u_cr then
       let rec aux_newline ch =
@@ -789,7 +790,7 @@ let prepare_fparser enc process_unknown_encoding =
 		 if List.length chs < 4 then
 		    raise TooFew;
 		 let chs = Array.of_list chs in
-		 let encoding, fdecoder = Encoding.autodetect_encoding 
+		 let encoding, fdecoder = Xmlencoding.autodetect_encoding 
 		    (Uchar.of_char chs.(0)) (Uchar.of_char chs.(1)) 
 		    (Uchar.of_char chs.(2)) (Uchar.of_char chs.(3))
 		 in
@@ -798,19 +799,19 @@ let prepare_fparser enc process_unknown_encoding =
 	   in
 	      autodetect
       | "UTF-8" -> 
-	   (fun state -> fparser state Encoding.decode_utf8 norm_nl start_lexer)
+	   (fun state -> fparser state Xmlencoding.decode_utf8 norm_nl start_lexer)
       | "UTF-16" ->
 	   (fun state ->
-	       fparser state (Encoding.decode_utf16 Encoding.BE) 
+	       fparser state (Xmlencoding.decode_utf16 Xmlencoding.BE) 
 		  norm_nl start_lexer)
       | "ASCII" ->
-	   (fun state -> fparser state  Encoding.decode_ascii 
+	   (fun state -> fparser state  Xmlencoding.decode_ascii 
 	       norm_nl start_lexer)
       | "LATIN1" ->
-	   (fun state -> fparser state Encoding.decode_latin1 
+	   (fun state -> fparser state Xmlencoding.decode_latin1 
 	       norm_nl start_lexer)
       | "UCS-4" ->
-	   (fun state -> fparser state  Encoding.decode_ucs4 
+	   (fun state -> fparser state  Xmlencoding.decode_ucs4 
 	       norm_nl start_lexer)
       | other ->
 	   failwith ("Unsupported encoding " ^ other)
@@ -860,7 +861,7 @@ let create ?encoding
    in
       {
 	 encoding = enc;
-	 fencoder = Encoding.encode_utf8;
+	 fencoder = Xmlencoding.encode_utf8;
 	 fparser = fparser;
 	 strm = Stream.of_string "";
 	 nextf = nextf;
@@ -880,12 +881,6 @@ let parse state str start len =
 
 let finish state =
    state.nextf EOD (fun _ -> failwith "XML Parser finished")
-
-(*
-   let strm = Stream.of_string "" in
-      state.strm <- strm;
-      state.fparser state true state.nextf
-*)
 	 
 let reset state process_production =
    let fparser = prepare_fparser state.encoding state.encoding_handler in

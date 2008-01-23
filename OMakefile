@@ -15,7 +15,7 @@ GENERATED_FILES[] =
    xml_decode.ml
 
 FILES[] =
-   encoding
+   xmlencoding
    uchar
    xmlchar
    xml_encode
@@ -33,6 +33,7 @@ LIB = xml
 
 IFILES[] =
    xml
+   xmlencoding
    xmlparser
    sax
    sax_ns
