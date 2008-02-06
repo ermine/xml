@@ -43,8 +43,8 @@ let _ =
 
    let tin = open_in file in
    let rec aux_cycle () =
-      let buf = String.create 1024 in
-      let size = input tin buf 0 1024 in
+      let buf = String.create 10 in
+      let size = input tin buf 0 10 in
 	 if size = 0 then (
 	    close_in tin;
 	    Xmlparser.finish p

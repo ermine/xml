@@ -8,6 +8,10 @@ open Xmlencoding
 exception LexerError of string
 exception UnknownEntity of string
 
+type data =
+   | EOB
+   | UCS4 of int
+
 type production =
    | StartElement of string * (string * string) list
    | EndElement of string
@@ -19,7 +23,6 @@ type production =
    | Text of string
    | Doctype of string * Xml.external_id option * string
    | EOD
-(*   | EOB *)
 
 type cb = production -> ('a -> unit) -> unit as 'a
 
@@ -32,36 +35,47 @@ type parser_t = {
    entity_handler : string -> int;
    encoding_handler : string -> (char -> (char, int) Fstream.t);
 }
-and lstream = | Lexer of (parser_t -> int -> lstream) 
-		 | Switch of 
-		      (char -> (char, int) Fstream.t) * 
-			 (parser_t -> int -> lstream)
-		 | Token of production * (parser_t -> int -> lstream)
+and lstream = | Lexer of (parser_t -> data -> lstream) 
+	      | Switch of 
+		   (char -> (char, int) Fstream.t) * 
+		      (parser_t -> data -> lstream)
+	      | Token of production * (parser_t -> data -> lstream)
+
+let rec ignore_eob f state data =
+   match data  with
+      | EOB -> Lexer (ignore_eob f)
+      | UCS4 ucs4 -> f state ucs4
 
 let accept_if str f =
    let len = String.length str in
    let rec aux_accept i state ch =
       if i < len then
 	 if ch = Uchar.of_char str.[i] then
-	    Lexer (aux_accept (i+1))
+	    Lexer (ignore_eob (aux_accept (i+1)))
 	 else 
 	    raise (LexerError (Printf.sprintf "expected '%s'" str))
       else
-	 f state ch
+	 f state (UCS4 ch)
    in
-      Lexer (aux_accept 0)
+      Lexer (ignore_eob (aux_accept 0))
 
-let rec skip_blank f state ucs4 =
-   if Xmlchar.is_blank ucs4 then
-      Lexer (skip_blank f)
-   else
-      f state ucs4
+let rec skip_blank f state = function
+   | EOB ->
+	Lexer (skip_blank f)
+   | UCS4 ucs4 ->
+	if Xmlchar.is_blank ucs4 then
+	   Lexer (skip_blank f)
+	else
+	   f state ucs4
 
-let after_blank nextf state ucs4 =
-   if Xmlchar.is_blank ucs4 then
-      Lexer (skip_blank nextf)
-   else
-      raise (LexerError "expected space")
+let after_blank nextf state = function
+   | EOB ->
+	Lexer (skip_blank nextf)
+   | UCS4 ucs4 ->
+	if Xmlchar.is_blank ucs4 then
+	   Lexer (skip_blank nextf)
+	else
+	   raise (LexerError "expected space")
 
 let fencoder state buf ucs4 =
    match state.fencoder ucs4 with
@@ -76,7 +90,7 @@ let parse_ncname nextf state ucs4 =
    let rec get_name state ucs4 =
       if Xmlchar.is_ncnamechar ucs4 then (
          fencoder state buf ucs4;
-         Lexer get_name
+         Lexer (ignore_eob get_name)
       ) else (
          let name = Buffer.contents buf in
             Buffer.clear buf;
@@ -85,7 +99,7 @@ let parse_ncname nextf state ucs4 =
    in
       if Xmlchar.is_first_ncnamechar ucs4 then (
 	 fencoder state buf ucs4;
-	 Lexer get_name
+	 Lexer (ignore_eob get_name)
       )
       else
 	 raise (LexerError "invalid name")
@@ -111,16 +125,16 @@ let parse_name nextf state ucs4 =
    let rec get_name state ucs4 =
       if Xmlchar.is_namechar ucs4 then (
          fencoder state buf ucs4;
-         Lexer get_name
+         Lexer (ignore_eob get_name)
       ) else (
          let name = Buffer.contents buf in
-            Buffer.clear buf;
+            Buffer.reset buf;
             nextf name state ucs4
       )
    in
       if Xmlchar.is_first_namechar ucs4 then (
 	 fencoder state buf ucs4;
-	 Lexer get_name
+	 Lexer (ignore_eob get_name)
       )
       else (
 	 fencoder state buf ucs4;
@@ -130,7 +144,7 @@ let parse_name nextf state ucs4 =
 let parse_decimal_charref nextf state ucs4 =
    let rec get_decimal acc state ucs4 =
       if ucs4 >= Uchar.of_char '0' && ucs4 <= Uchar.of_char '9' then
-	 Lexer (get_decimal (acc * 10 + (ucs4 - Uchar.of_char '0')))
+	 Lexer (ignore_eob (get_decimal (acc * 10 + (ucs4 - Uchar.of_char '0'))))
       else if ucs4 = Uchar.u_semicolon then
 	 nextf acc
       else
@@ -141,33 +155,40 @@ let parse_decimal_charref nextf state ucs4 =
 let parse_hexacimal_charref nextf =
    let rec get_decimal acc state ucs4 =
       if ucs4 >= Uchar.of_char '0' && ucs4 <= Uchar.of_char '9' then
-	 Lexer (get_decimal (acc * 16 + (ucs4 - Uchar.of_char '0')))
+	 Lexer (ignore_eob (get_decimal (acc * 16 + (ucs4 - Uchar.of_char '0'))))
       else if ucs4 >= Uchar.of_char 'A' && ucs4 <= Uchar.of_char 'F' then
-	 Lexer (get_decimal (acc * 16 + (ucs4 - Uchar.of_char 'A' + 10)))
+	 Lexer (ignore_eob 
+		   (get_decimal (acc * 16 + (ucs4 - Uchar.of_char 'A' + 10))))
       else if ucs4 >= Uchar.of_char 'a' && ucs4 <= Uchar.of_char 'f' then
-	 Lexer (get_decimal (acc * 16 + (ucs4 - Uchar.of_char 'a' + 10)))
+	 Lexer (ignore_eob
+		   (get_decimal (acc * 16 + (ucs4 - Uchar.of_char 'a' + 10))))
       else if ucs4 = Uchar.u_semicolon then
 	 nextf state acc
       else
 	 raise (LexerError "malformed character reference")
    in
-      Lexer (get_decimal 0)
+      Lexer (ignore_eob (get_decimal 0))
 
+(*
+ * [66] CharRef ::= '&#' [0-9]+ ';'                                             
+ *                | '&#x' [0-9a-fA-F]+ ';' [WFC: Legal Character]
+ *)
 let parse_reference buf nextf state ucs4 =
    if ucs4 = Uchar.of_char '#' then
-      Lexer (fun state ucs4 ->
-		if ucs4 = Uchar.of_char 'x' then
-		   parse_hexacimal_charref (fun state ucs4 ->
-					       fencoder state buf ucs4;
-					       Lexer nextf
-					   )
-		else
-		   parse_decimal_charref 
-		      (fun ucs4 -> 
-			  fencoder state buf ucs4;
-			  Lexer nextf
-		      ) state ucs4
-	    )
+      Lexer (ignore_eob 
+		(fun state ucs4 ->
+		    if ucs4 = Uchar.of_char 'x' then
+		       parse_hexacimal_charref (fun state ucs4 ->
+						   fencoder state buf ucs4;
+						   Lexer nextf
+					       )
+		    else
+		       parse_decimal_charref 
+			  (fun ucs4 -> 
+			      fencoder state buf ucs4;
+			      Lexer nextf
+			  ) state ucs4
+		))
    else
       parse_name 
 	 (fun name state ucs4 ->
@@ -188,53 +209,61 @@ let parse_reference buf nextf state ucs4 =
 			  ("invalid reference: expecting ':' after '&" ^ name
 			   ^ "'"))
 	 ) state ucs4
-	 
-let parse_text nextf state ucs4 =
+
+(*
+ * [14] CharData ::= [^<&]* - ([^<&]* ']]>' [^<&]* )  
+ *)
+let parse_text nextf lexer state data =
    let buf = Buffer.create 30 in
-   let rec get_text state ucs4 =
-      if ucs4 = Uchar.u_lt then (
-	 let text = Buffer.contents buf in
-	    Buffer.clear buf;
-	    nextf text ucs4
-      ) else if ucs4 = Uchar.u_closebr then
-	 Lexer (fun state ucs42 ->
-		   if ucs42 = Uchar.u_lt then
-		      let text = Buffer.contents buf in
-			 Buffer.clear buf;
-			 nextf text ucs42
-		   else if ucs42 = Uchar.u_closebr then
-		      Lexer (fun _state ucs43 ->
-				if ucs43 = Uchar.u_gt then
-				   raise (LexerError 
-					     "']]>' is not allowed in text")
-				else (
-				   fencoder state buf ucs4;
-				   fencoder state buf ucs42;
-				   fencoder state buf ucs43;
-				   Lexer get_text
-				)
-			    )
-		   else (
-		      fencoder state buf ucs4;
-		      fencoder state buf ucs42;
-		      Lexer get_text
-		   )
-	       )
-      else if ucs4 = Uchar.u_amp then
-	 Lexer (parse_reference buf get_text)
-      else (
-	 fencoder state buf ucs4;
-	 Lexer get_text
-      )
+   let rec get_text state = function
+      | UCS4 ucs4 ->
+	   if ucs4 = Uchar.u_lt then (
+	      let text = Buffer.contents buf in
+		 Buffer.clear buf;
+		 nextf text ucs4
+	   ) else if ucs4 = Uchar.u_closebr then
+	      Lexer (ignore_eob
+			(fun state ucs42 ->
+			    if ucs42 = Uchar.u_lt then
+			       let text = Buffer.contents buf in
+				  Buffer.clear buf;
+				  nextf text ucs42
+			    else if ucs42 = Uchar.u_closebr then
+			       Lexer (ignore_eob
+					 (fun _state ucs43 ->
+					     if ucs43 = Uchar.u_gt then
+						raise (LexerError 
+						  "']]>' is not allowed in text")
+					     else (
+						fencoder state buf ucs4;
+						fencoder state buf ucs42;
+						fencoder state buf ucs43;
+						Lexer get_text
+					     )))
+			    else (
+			       fencoder state buf ucs4;
+			       fencoder state buf ucs42;
+			       Lexer get_text
+			    )))
+	   else if ucs4 = Uchar.u_amp then
+	      Lexer (ignore_eob (parse_reference buf get_text))
+	   else (
+	      fencoder state buf ucs4;
+	      Lexer get_text
+	   )
+      | EOB ->
+	   let text = Buffer.contents buf in
+	      Buffer.reset buf;
+	      Token (Text text, lexer)
    in
-      get_text state ucs4
+      get_text state data
 
 let parse_whitespace nextf state ucs4 =
    let buf = Buffer.create 10 in
    let rec get_spaces state (ucs4:int) =
       if Xmlchar.is_blank ucs4 then (
 	 fencoder state buf ucs4;
-	 Lexer get_spaces
+	 Lexer (ignore_eob get_spaces)
       )
       else
 	 let text = Buffer.contents buf in
@@ -242,36 +271,40 @@ let parse_whitespace nextf state ucs4 =
 	    nextf text ucs4
    in
       fencoder state buf ucs4;
-      Lexer get_spaces
+      Lexer (ignore_eob get_spaces)
 
+(*
+ * [15] Comment ::= '<!--' ((Char - '-') | ('-' (Char - '-')))* '-->'
+ *)
 let parse_comment nextf state ucs4 =
    let buf = Buffer.create 30 in
    if ucs4 = Uchar.u_dash then
       let rec get_comment state ucs41 =
 	 if ucs41 = Uchar.u_dash then
-	    Lexer (fun _state ucs42 ->
-		      if ucs42 = Uchar.u_dash then
-			 Lexer (fun _state ucs43 ->
-				   if ucs43 = Uchar.u_gt then
-				      let comment = Buffer.contents buf in
-					 Buffer.clear buf;
-					 nextf comment
-				   else
-				      raise (LexerError 
-					"-- is not allowed inside comment")
-			       )
-		      else (
-			 fencoder state buf ucs41;
-			 fencoder state buf ucs42;
-			 Lexer get_comment
-		      )
-		  )
+	    Lexer (ignore_eob 
+		      (fun _state ucs42 ->
+			  if ucs42 = Uchar.u_dash then
+			     Lexer (ignore_eob
+				       (fun _state ucs43 ->
+				    if ucs43 = Uchar.u_gt then
+				       let comment = Buffer.contents buf in
+					  Buffer.clear buf;
+					  nextf comment
+				    else
+				       raise (LexerError 
+					      "-- is not allowed inside comment")
+				))
+			  else (
+			     fencoder state buf ucs41;
+			     fencoder state buf ucs42;
+			     Lexer (ignore_eob get_comment)
+			  )))
 	 else (
 	    fencoder state buf ucs41;
-	    Lexer get_comment
+	    Lexer (ignore_eob get_comment)
 	 )
       in
-	 Lexer get_comment
+	 Lexer (ignore_eob get_comment)
    else
       raise (LexerError "Malformed cooment")
 
@@ -285,10 +318,10 @@ let parse_string nextf state ucs4 =
 	       nextf str
 	 else (
 	    fencoder state buf ucs4;
-	    Lexer (get_text qt)
+	    Lexer (ignore_eob (get_text qt))
 	 )
       in
-	 Lexer (get_text ucs4)
+	 Lexer (ignore_eob (get_text ucs4))
    else
       raise (LexerError "expected string")
 	 
@@ -302,14 +335,14 @@ let parse_external_id nextf state ucs4 =
 	 (after_blank 
 	     (parse_string 
 		 (fun str -> 
-		     Lexer 
+		     Lexer  
 			(after_blank 
 			    (parse_string 
 				(fun str2 ->
 				    Lexer (nextf (Some (`Public (str, str2))))
 				))))))
    else
-      nextf None state ucs4
+      nextf None state (UCS4 ucs4)
 
 let parse_doctype nextf =
    accept_if "OCTYPE "
@@ -321,7 +354,7 @@ let parse_doctype nextf =
 			     else if Xmlchar.is_blank ucs4 then
 				Lexer (skip_blank (parse_external_id
 					  (fun ext ->
-					  (fun state ucs4 ->
+					  (fun state data ->
 					      let buf = Buffer.create 30 in
 					      let rec get_text state ucs4 =
 						 if ucs4 = Uchar.u_gt then
@@ -331,12 +364,11 @@ let parse_doctype nextf =
 						       nextf name ext text
 						 else (
 						    fencoder state buf ucs4;
-						    Lexer get_text
+						    Lexer (ignore_eob get_text)
 						 )
 					      in
-						 get_text state ucs4
-					  )))
-				      )
+						 ignore_eob get_text state data
+					  ))))
 			     else
 				raise (LexerError "bad doctype syntax")
 			 ) state ucs4
@@ -351,20 +383,21 @@ let parse_attrvalue nextf state ucs4 =
       if ucs4 = qt then
 	 let value = Buffer.contents buf in
 	    Buffer.clear buf;
-	    Lexer (nextf value)
+	    Lexer (ignore_eob (nextf value))
       else if ucs4 = Uchar.u_amp then
-	 Lexer (parse_reference buf (get_value qt))
+	 Lexer (ignore_eob (parse_reference buf 
+			       (ignore_eob (get_value qt))))
       else if ucs4 = Uchar.u_lf || ucs4 = Uchar.u_tab then (
 	 fencoder state buf ucs4;
-	 Lexer (get_value qt)
+	 Lexer (ignore_eob (get_value qt))
       )
       else (
 	 fencoder state buf ucs4;
-	 Lexer (get_value qt)
+	 Lexer (ignore_eob (get_value qt))
       )
    in
       if ucs4 = Uchar.u_apos || ucs4 = Uchar.u_quot then
-	 Lexer (get_value ucs4)
+	 Lexer (ignore_eob (get_value ucs4))
       else (
 	 Printf.printf "expected '\', was %d\n" ucs4;
 	 raise (LexerError "malformed attribute value")
@@ -379,7 +412,7 @@ let parse_eq nextf state ucs4 =
 		     Lexer (skip_blank nextf)
 		  else
 		     raise (LexerError "Expected '='")
-	      ) state ucs4
+	      ) state (UCS4 ucs4)
 
 (*
  * [41] Attribute   ::= Name Eq AttValue
@@ -391,34 +424,34 @@ let rec parse_attributes tag attrs nextf state ucs4 =
    if ucs4 = Uchar.u_gt then
       nextf tag attrs true
    else if ucs4 = Uchar.u_slash then
-      Lexer (fun state ucs4 ->
-		if ucs4 = Uchar.u_gt then
-		   nextf tag attrs false
-		else
-		   raise (LexerError "invalid end of start tag")
-	    )
+      Lexer (ignore_eob (fun state ucs4 ->
+			    if ucs4 = Uchar.u_gt then
+			       nextf tag attrs false
+			    else
+			       raise (LexerError "invalid end of start tag")
+			))
    else 
       let smth state ucs4 =
 	 if ucs4 = Uchar.u_gt then
 	    nextf tag attrs true
 	 else if ucs4 = Uchar.u_slash then
-	    Lexer (fun state ucs4 ->
-		      if ucs4 = Uchar.u_gt then
-			 nextf tag attrs false
-		      else
-			 raise (LexerError "bad end of empty tag")
-		  )
+	    Lexer (ignore_eob (fun state ucs4 ->
+				  if ucs4 = Uchar.u_gt then
+				     nextf tag attrs false
+				  else
+				     raise (LexerError "bad end of empty tag")
+			      ))
 	 else 
 	    parse_name
 	       (fun name ->
-		   parse_eq (parse_attrvalue
-				(fun value ->
-				    parse_attributes tag 
-				       ((name, value) :: attrs) nextf
-				))
+		   (parse_eq (parse_attrvalue
+					    (fun value ->
+						parse_attributes tag 
+						   ((name, value) :: attrs) nextf
+					    )))
 	       ) state ucs4
       in
-	 after_blank smth state ucs4
+	 after_blank smth state (UCS4 ucs4)
 
 (*
  * [40] STag      ::= '<' Name (S Attribute)* S? '>'
@@ -431,13 +464,14 @@ let parse_start_element nextf state ucs4 =
  *)
 let parse_end_element nextf state ucs4 =
    parse_name
-      (fun name ->
+      (fun name state ucs4 ->
 	  skip_blank (fun state ucs4 ->
 			 if ucs4 = Uchar.u_gt then
 			    nextf name
 			 else
 			    raise (LexerError "bad closing tag")
-		     )) state ucs4
+		     ) state (UCS4 ucs4)
+      ) state ucs4
 	 
 (*
  * [18] CDSect  ::= CDStart CData CDEnd
@@ -447,67 +481,77 @@ let parse_end_element nextf state ucs4 =
 *)
 let parse_cdata nextf =
    let buf = Buffer.create 30 in
-   let rec get_cdata state ch1 =
-      if ch1 = Uchar.u_closebr then
-	 Lexer (fun state ch2 ->
-		   if ch2 = Uchar.u_closebr then
-		      let rec aux_tail state ucs4 =
-			 if ucs4 = Uchar.u_gt then
-			    let cdata = Buffer.contents buf in
-			       Buffer.reset buf;
-			       nextf cdata
-			 else if ucs4 = Uchar.u_closebr then (
-			    fencoder state buf Uchar.u_closebr;
-			    Lexer aux_tail
-			 )   
-			 else (
-			    fencoder state buf Uchar.u_closebr;
-			    fencoder state buf Uchar.u_closebr;
-			    fencoder state buf ucs4;
-			    Lexer get_cdata
-			 )
-		      in
-			 Lexer aux_tail
-		   else (
-		      fencoder state buf ch1;
-		      fencoder state buf ch2;
-		      Lexer get_cdata
-		   )
-	       )
-      else (
-	 fencoder state buf ch1;
-	 Lexer get_cdata
-      )
+   let rec get_cdata state = function
+      | UCS4 ch1 ->
+	   if ch1 = Uchar.u_closebr then
+	      Lexer (ignore_eob
+			(fun state ch2 ->
+			    if ch2 = Uchar.u_closebr then
+			       let rec aux_tail state ucs4 =
+				  if ucs4 = Uchar.u_gt then
+				     let cdata = Buffer.contents buf in
+					Buffer.reset buf;
+					nextf cdata
+				  else if ucs4 = Uchar.u_closebr then (
+				     fencoder state buf Uchar.u_closebr;
+				     Lexer (ignore_eob aux_tail)
+				  )
+				  else (
+				     fencoder state buf Uchar.u_closebr;
+				     fencoder state buf Uchar.u_closebr;
+				     fencoder state buf ucs4;
+				     Lexer get_cdata
+				  )
+			       in
+				  Lexer (ignore_eob aux_tail)
+			    else (
+			       fencoder state buf ch1;
+			       fencoder state buf ch2;
+			       Lexer get_cdata
+			    )))
+	   else (
+	      fencoder state buf ch1;
+	      Lexer get_cdata
+	   )
+      | EOB ->
+	   let cdata = Buffer.contents buf in
+	      Buffer.reset buf;
+	      Token (Cdata cdata, get_cdata)
    in
-      accept_if "CDATA[" (fun state ucs4 -> get_cdata state ucs4)
-	 
-let parse_pi nextf state ucs4 =
+      accept_if "CDATA[" 
+	 (ignore_eob (fun state ucs4 -> get_cdata state (UCS4 ucs4)))
+
+(*
+ * [16] PI       ::= '<?' PITarget (S (Char* - (Char* '?>' Char* )))? '?>'
+ * [17] PITarget ::= Name - (('X' | 'x') ('M' | 'm') ('L' | 'l'))
+ *)
+let parse_pi nextf =
    parse_name 
       (fun target state ucs4 ->
 	  let buf = Buffer.create 30 in
 	  let rec get_pi_content state ucs41 =
 	     if ucs41 = Uchar.u_quest then
-		Lexer (fun state ucs42 ->
-			  if ucs42 = Uchar.u_gt then
-			     let data = Buffer.contents buf in
-				Buffer.clear buf;
-				nextf target data
-			  else (
-			     fencoder state buf ucs41;
-			     fencoder state buf ucs42;
-			     Lexer get_pi_content
-			  )
-		      )
+		Lexer (ignore_eob (fun state ucs42 ->
+				      if ucs42 = Uchar.u_gt then
+					 let pidata = Buffer.contents buf in
+					    Buffer.clear buf;
+					    nextf target pidata
+				      else (
+					 fencoder state buf ucs41;
+					 fencoder state buf ucs42;
+					 Lexer (ignore_eob get_pi_content)
+				      )
+				  ))
 	     else (
 		fencoder state buf ucs41;
-		Lexer get_pi_content
+		Lexer (ignore_eob get_pi_content)
 	     )
 	  in
-	     after_blank get_pi_content state ucs4
-      ) state ucs4
+	     after_blank get_pi_content state (UCS4 ucs4)
+      )
       
 (*
- *  [23] XMLDecl     ::= '<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>' 
+ * [23] XMLDecl     ::= '<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>' 
  * [24] VersionInfo ::= S 'version' Eq ("'" VersionNum "'" | '"' VersionNum '"')
  * [25] Eq          ::= S? '=' S?
  * [26] VersionNum  ::= '1.0'
@@ -573,26 +617,33 @@ let parse_xmldecl state data =
    let attrs = get_attrs [] 0 in
       List.rev attrs
 
-let rec lexer state ucs4 =
+let rec lexer state (data:data) =
    let opened_lt state ucs4 =
       if ucs4 = Uchar.u_slash then
-	 Lexer (parse_end_element (fun name -> Token (EndElement name, lexer)))
+	 Lexer (ignore_eob
+		   (parse_end_element 
+		       (fun name -> Token (EndElement name, lexer))))
       else if ucs4 = Uchar.u_quest then
-	 Lexer (parse_pi (fun target data -> Token (Pi (target, data), lexer)))
+	 Lexer (ignore_eob
+		   (parse_pi 
+		       (fun target data -> Token (Pi (target, data), lexer))))
       else if ucs4 = Uchar.u_excl then
-	 Lexer (fun state ucs4 ->
-		   if ucs4 = Uchar.u_openbr then
-		      parse_cdata (fun cdata -> Token (Cdata cdata, lexer))
-		   else if ucs4 = Uchar.u_dash then
-		      Lexer (parse_comment 
-				(fun comment -> Token (Comment comment, lexer)))
-		   else if ucs4 = Uchar.of_char 'D' then
-		      parse_doctype
-			 (fun name ext_id str -> 
-			     Token (Doctype (name, ext_id, str), lexer))
-		   else
-		      raise (LexerError "unknown token <!.")
-	       )
+	 Lexer (ignore_eob
+		   (fun state ucs4 ->
+		       if ucs4 = Uchar.u_openbr then
+			  parse_cdata (fun cdata -> Token (Cdata cdata, lexer))
+		       else if ucs4 = Uchar.u_dash then
+			  Lexer (ignore_eob
+				    (parse_comment 
+					(fun comment -> 
+					    Token (Comment comment, lexer))))
+		       else if ucs4 = Uchar.of_char 'D' then
+			  parse_doctype
+			     (fun name ext_id str -> 
+				 Token (Doctype (name, ext_id, str), lexer))
+		       else
+			  raise (LexerError "unknown token <!.")
+		   ))
       else 
 	 parse_start_element 
 	    (fun name attrs flag ->
@@ -603,32 +654,36 @@ let rec lexer state ucs4 =
 	    )
 	    state ucs4
    in
-      if ucs4 = Uchar.u_lt then
-	 Lexer opened_lt
-      else
-	 if Xmlchar.is_blank ucs4 then
-	    parse_whitespace 
-	       (fun text ucs4 -> 
-		   if ucs4 = Uchar.u_lt then
-		      Token (Whitespace text, opened_lt)
-		   else (
-		      parse_text (fun text ucs4 ->
-				     if ucs4 = Uchar.u_lt then
-					Token (Text text, opened_lt)
-				     else
-					raise (LexerError "expected '<'"))
-			 state ucs4
-		   )
-	       )
-	       state ucs4
-	 else
-	    parse_text 
-	       (fun text ucs4 -> 
-		   if ucs4 = Uchar.u_lt then
-		      Token (Text text, opened_lt)
-		   else
-		      raise (LexerError "expected '<'"))
-	       state ucs4
+      match data with
+	 | UCS4 ucs4 ->
+	      if ucs4 = Uchar.u_lt then
+		 Lexer (ignore_eob opened_lt)
+	      else if Xmlchar.is_blank ucs4 then
+		 parse_whitespace 
+		    (fun text ucs4 -> 
+			if ucs4 = Uchar.u_lt then
+			   Token (Whitespace text, (ignore_eob opened_lt))
+			else (
+			   parse_text (fun text ucs4 ->
+					  if ucs4 = Uchar.u_lt then
+					     Token (Text text, 
+						    (ignore_eob opened_lt))
+					  else
+					     raise (LexerError "expected '<'"))
+			      lexer state (UCS4 ucs4)
+			)
+		    )
+		    state ucs4
+	      else
+		 parse_text 
+		    (fun text ucs4 -> 
+			if ucs4 = Uchar.u_lt then
+			   Token (Text text, (ignore_eob opened_lt))
+			else
+			   raise (LexerError "expected '<'"))
+		    lexer state (UCS4 ucs4)
+	 | EOB ->
+	      Lexer lexer
 	    
 let process_xmldecl attrs state =
    let version = 
@@ -669,31 +724,36 @@ let process_xmldecl attrs state =
  * [22] prolog      ::= XMLDecl? Misc* (doctypedecl Misc* )?
  * [27] Misc        ::= Comment | PI | S
  *)
-let rec start_lexer state ucs4 =
+let rec start_lexer state (data:data) =
    let opened_lt state ucs4 =
       if ucs4 = Uchar.u_slash then
-	 Lexer (parse_end_element (fun name -> Token (EndElement name, lexer)))
+	 Lexer (ignore_eob
+		   (parse_end_element 
+		       (fun name -> Token (EndElement name, lexer))))
       else if ucs4 = Uchar.u_quest then
-	Lexer ( parse_pi (fun pi data -> 
+	Lexer (ignore_eob (parse_pi (fun pi data -> 
 			     if pi = "xml" then
 				let attrs = parse_xmldecl state data in
 				   process_xmldecl attrs state
 			     else
-				Token (Pi (pi, data), lexer)))
+				Token (Pi (pi, data), lexer))))
       else if ucs4 = Uchar.u_excl then
-	 Lexer (fun state ucs4 ->
+	 Lexer (ignore_eob
+		   (fun state ucs4 ->
 		   if ucs4 = Uchar.u_openbr then
 		      parse_cdata (fun cdata -> Token (Cdata cdata, lexer))
 		   else if ucs4 = Uchar.u_dash then
-		      Lexer (parse_comment 
-				(fun comment -> Token (Comment comment, lexer)))
+		      Lexer (ignore_eob 
+				(parse_comment 
+				    (fun comment -> 
+					Token (Comment comment, lexer))))
 		   else if ucs4 = Uchar.of_char 'D' then
 		      parse_doctype
 			 (fun name ext_id str -> 
 			     Token (Doctype (name, ext_id, str), lexer))
 		   else
 		      raise (LexerError "unknown token <!.")
-	       )
+		   ))
       else 
 	 parse_start_element 
 	    (fun name attrs flag ->
@@ -704,15 +764,19 @@ let rec start_lexer state ucs4 =
 	    )
 	    state ucs4
    in
-      if ucs4 = Uchar.u_lt then
-	 Lexer opened_lt
-      else
-	 if Xmlchar.is_blank ucs4 then
-	    parse_whitespace 
-	       (fun text ucs4 -> Token (Whitespace text, opened_lt))
-	       state ucs4
-	 else
-	    raise (LexerError "Start tag expected, '<' not found")
+      match data with
+	 | UCS4 ucs4 ->
+	      if ucs4 = Uchar.u_lt then
+		 Lexer (ignore_eob opened_lt)
+	      else if Xmlchar.is_blank ucs4 then
+		 parse_whitespace 
+		    (fun text ucs4 -> 
+			Token (Whitespace text, (ignore_eob opened_lt)))
+		    state ucs4
+	      else
+		 raise (LexerError "Start tag expected, '<' not found")
+	 | EOB ->
+	      Lexer lexer	      
 
 (*
 let debug_tag = function
@@ -769,7 +833,7 @@ let rec fparser state fdecoder norm_nl flexer nextf=
 		       | F norm_nl ->
 			    fparser state fdecoder norm_nl flexer nextf
 		       | R (ucs4, norm_nl) ->
-			    match flexer state ucs4 with
+			    match flexer state (UCS4 ucs4) with
 			       | Lexer flexer ->
 				    fparser state fdecoder norm_nl flexer nextf
 			       | Switch (fdecoder, flexer) ->
@@ -779,8 +843,23 @@ let rec fparser state fdecoder norm_nl flexer nextf=
 				       (fparser state fdecoder norm_nl flexer)
 	   )
       | None ->
-	   state.nextf <- nextf;
-	   state.fparser <- fun state -> fparser state fdecoder norm_nl flexer
+	   (match flexer state EOB with
+	       | Lexer flexer ->
+		    state.nextf <- nextf;
+		    state.fparser <- 
+		       (fun state -> fparser state fdecoder norm_nl flexer)
+	       | Switch (fdecoder, flexer) ->
+		    state.nextf <- nextf;
+		    state.fparser <-
+		       (fun state ->
+			   fparser state fdecoder norm_nl flexer)
+	       | Token (tag, flexer) ->
+		    nextf tag 
+		       (fun newnextf ->
+			   state.nextf <- newnextf;
+			   state.fparser <- 
+			      (fun state ->
+				  fparser state fdecoder norm_nl flexer)))
    
 let prepare_fparser enc process_unknown_encoding =
    match enc with

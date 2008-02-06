@@ -5,6 +5,10 @@
 exception LexerError of string
 exception UnknownEntity of string
 
+type data =
+   | EOB
+   | UCS4 of int
+
 type production =
     StartElement of string * (string * string) list
   | EndElement of string
@@ -29,9 +33,9 @@ type parser_t = {
   encoding_handler : string -> char -> (char, int) Fstream.t;
 }
 and lstream =
-    Lexer of (parser_t -> int -> lstream)
-  | Switch of (char -> (char, int) Fstream.t) * (parser_t -> int -> lstream)
-  | Token of production * (parser_t -> int -> lstream)
+    Lexer of (parser_t -> data -> lstream)
+  | Switch of (char -> (char, int) Fstream.t) * (parser_t -> data -> lstream)
+  | Token of production * (parser_t -> data -> lstream)
 
 val create :
   ?encoding:Xmlencoding.encoding ->
