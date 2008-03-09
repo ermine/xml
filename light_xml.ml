@@ -217,6 +217,7 @@ let process_production callback =
 	      let qname, lnss, attrs = 
 		 parse_element_head namespaces name attrs in
 	      let el = Xmlelement (qname, lnss, attrs, []) in
+		 remove_namespaces namespaces lnss;
 		 fparser (process_epiloque el)
 	 | Xmlparser.EOD ->
 	      raise End_of_file
