@@ -20,25 +20,23 @@ FILES[] =
    xmlchar
    xml_encode
    xml_decode
-   xml
    xmlparser
+   xml
    sax
    sax_ns
    dom
-   light_xml
    
 LIB = xml
 
 .DEFAULT: $(OCamlLibrary $(LIB), $(FILES))
 
 IFILES[] =
-   xml
    xmlencoding
    xmlparser
+   xml
    sax
    sax_ns
    dom
-   light_xml
 
 ALIBS[] =
 

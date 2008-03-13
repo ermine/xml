@@ -15,7 +15,7 @@ OCAMLFLAGS += -rectypes
 foreach(name, $(TESTS))
    OCAML_OTHER_LIBS = fstream ini_config conversion xml
    OCamlProgram($(name), $(name))
-   $(name): $(addsuffix .ml, $(name))
+   $(name)$(EXE): $(addsuffix .ml, $(name))
 
 testlib: $(TESTS)
 

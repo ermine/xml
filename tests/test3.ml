@@ -15,7 +15,7 @@ let entity_handler entity =
 
 let callback dom =
    let out = print_string in
-      Xml.serialize out dom
+      Dom.serialize out dom
 
 let _ =
    let fin = open_in Sys.argv.(1) in

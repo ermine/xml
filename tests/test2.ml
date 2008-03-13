@@ -5,26 +5,30 @@
 open Printf
 open Xml
 
-let start_ns_handler (prefix, ns) =
+let start_ns_handler (ns, prefix) =
    printf "NS start %s %s\n" prefix (match ns with
 					| `URI uri -> "URI " ^ uri
 					| `None -> "None"
 				    )
 
-let end_ns_handler (prefix, ns) =
+let end_ns_handler (ns, prefix) =
    printf "NS end %s %s\n" prefix (match ns with
 				      | `URI uri -> "URI " ^ uri
 				      | `None -> "None"
 				  )
 
-let start_element_handler qname attrs =
-   printf "StartElement %s\n" (string_of_qname qname);
-   List.iter (fun (qname, value) ->
-		 Printf.printf "   %s='%s'\n" (string_of_qname qname) value)
+let string_of_ns = function
+   | `None -> ""
+   | `URI str -> "URI " ^ str
+
+let start_element_handler (ns, lname) attrs =
+   printf "StartElement (%s) %s\n" (string_of_ns ns) lname;
+   List.iter (fun ((ns, lname), value) ->
+		 Printf.printf "   (%s) %s='%s'\n" (string_of_ns ns) lname value)
       attrs
 
-let end_element_handler qname =
-   printf "EndElement %s\n" (string_of_qname qname)
+let end_element_handler (ns, lname) =
+   printf "EndElement (%s) %s\n" (string_of_ns ns) lname
 
 let character_data_handler cdata =
    printf "Cdata [%s]\n" cdata

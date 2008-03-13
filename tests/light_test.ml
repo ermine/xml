@@ -2,14 +2,25 @@
  * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
-open Light_xml
+open Xml
 
 let unknown_encoding_handler encoding =
    Printf.printf "make_decoder %s\n" encoding;
    Conversion.make_decoder encoding
 
 let callback xml =
-   print_endline "parsed"
+   print_endline "parsed";
+   let ser = Xml.Serialization.init [] in
+   let buf = Buffer.create 80 in
+   let out str =
+      if Buffer.length buf >= 80 then (
+	 Buffer.output_buffer stdout buf;
+	 Buffer.reset buf
+      );
+      Buffer.add_string buf str
+   in
+      Xml.Serialization.serialize_document ser out xml;
+      Buffer.output_buffer stdout buf
 
 let _ =
    let file = Sys.argv.(1) in

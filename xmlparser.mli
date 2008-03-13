@@ -9,6 +9,14 @@ type data =
    | EOB
    | UCS4 of int
 
+type external_id = [ `System of string | `Public of string * string ]
+
+type dtd = {
+   name : string;
+   external_id : external_id option;
+   intsybset : string
+}
+
 type production =
     StartElement of string * (string * string) list
   | EndElement of string
@@ -18,7 +26,7 @@ type production =
   | Whitespace of string
   | Cdata of string
   | Text of string
-  | Doctype of string * Xml.external_id option * string
+  | Doctype of string * external_id option * string
   | EOD
 
 type cb = production -> ('a -> unit) -> unit as 'a

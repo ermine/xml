@@ -7,33 +7,6 @@ open Xmlparser
 
 exception Error of string
 
-let split_attrs attrs =
-   List.fold_left (fun (nss, attrs) (name, value) ->
-		      let prefix, lname = split_name name in
-			 if prefix = "" && lname = "xmlns" then
-			    (("", `URI value) :: nss), attrs
-			 else if prefix = "xmlns" && lname <> "" then
-			    ((lname, `URI value) :: nss) , attrs
-			 else
-			    nss, (((prefix, lname), value) :: attrs)
-		  ) ([], []) attrs
-
-let add_namespaces namespaces nss =
-   List.iter (fun (prefix, ns) -> Hashtbl.add namespaces prefix ns) nss
-
-let remove_namespaces namespaces nss =
-   List.iter (fun (prefix, ns) -> Hashtbl.remove namespaces prefix) nss
-
-let parse_qname nss (prefix, lname) =
-   try
-      let ns_mapping = Hashtbl.find nss prefix in
-	 (prefix, ns_mapping), lname
-   with Not_found ->
-      (prefix, `None), lname
-
-let parse_attrs nss attrs =
-   List.map (fun (name, value) -> parse_qname nss name, value) attrs
-
 let create
       ~start_ns_handler
       ~end_ns_handler
@@ -80,20 +53,18 @@ let create
 		     List.iter end_ns_handler lnss;
 		     remove_namespaces namespaces lnss
 	  | EndElement name ->
-	       let qname = 
-		  parse_qname namespaces (split_name name) in
-		  end_element_handler qname;
-		  let (name, lnss) = Stack.pop stack_ns in
-		     if qname = name then (
+	       let qname' = parse_qname namespaces (split_name name) in
+		  end_element_handler qname';
+		  let (qname, lnss) = Stack.pop stack_ns in
+		     if qname' = qname then (
 			List.iter end_ns_handler lnss;
 			remove_namespaces namespaces lnss;
 		     )
 		     else
-			raise (Error (
-				  (Printf.sprintf 
-				      "Bad end element: expected %s, was %s\n"
-				      (Xml.string_of_qname name)
-				      (Xml.string_of_qname qname))));
+			let _, expected = qname' in
+			   raise (Error (Printf.sprintf 
+					 "Bad end element: expected %s, was %s\n"
+					 expected name))
 	  | Doctype (name, ext, str) ->
 	       failwith "Unexpected DOCTYPE"
 	  | EOD ->
