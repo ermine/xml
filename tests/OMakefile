@@ -8,12 +8,13 @@ TESTS[] =
    test3
    light_test
 
-OCAMLINCLUDES += .. $(LIBDIR)
+#OCAMLINCLUDES += ..
 
-OCAMLFLAGS += -rectypes
+#OCAMLFLAGS += -rectypes
 
 foreach(name, $(TESTS))
-   OCAML_OTHER_LIBS = fstream ini_config conversion xml
+   OCAML_OTHER_LIBS = fstream ini_config conversion
+   OCAML_LIBS = ../xml
    OCamlProgram($(name), $(name))
    $(name)$(EXE): $(addsuffix .ml, $(name))
 

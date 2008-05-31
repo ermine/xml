@@ -2,7 +2,45 @@
  * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
-(* any Unicode character, excluding the surrogate blocks, FFFE, and FFFF. *)
+let of_char = Char.code
+
+let u_lt = of_char '<'
+let u_gt = of_char '>'
+let u_slash = of_char '/'
+let u_excl = of_char '!'
+let u_quest = of_char '?'
+let u_amp = of_char '&'
+let u_dash = of_char '-'
+let u_openbr = of_char '['
+let u_closebr = of_char ']'
+let u_dot = of_char '.'
+let u_colon = of_char ':'
+let u_semicolon = of_char ';'
+let u_underline = of_char '_'
+let u_eq = of_char '='
+let u_quot = of_char '"'
+let u_apos = of_char '\''
+let u_lf = of_char '\n'
+let u_cr = of_char '\r'
+let u_tab = of_char '\t'
+let u_percent = of_char '%'
+let u_openparen = of_char '('
+let u_closeparen = of_char ')'
+let u_sharp = of_char '#'
+let u_pipe = of_char '|'
+let u_star = of_char '*'
+let u_0 = of_char '0'
+let u_9 = of_char '9'
+let u_plus = of_char '+'
+let u_comma = of_char ','
+
+(*
+ * [2] Char      ::= #x9 | #xA | #xD |  /* any Unicode character,
+ *                   [#x20-#xD7FF] |    excluding the surrogate blocks,
+ *                   [#xE000-#xFFFD] |  FFFE, and FFFF. */
+ *                   [#x10000-#x10FFFF]
+ *)
+
 let is_xmlchar = function
    | 0x9 
    | 0xA
@@ -31,10 +69,6 @@ let of_lists list =
 			 aux set l
 		  ) XMLCharSet.empty list
 
-let blank =
-   List.fold_left (fun s u -> XMLCharSet.add u s)
-      XMLCharSet.empty [0x20; 0x9; 0xD; 0xA]
-      
 let basechar =
    of_lists
       [0x0041, 0x005A; 0x0061, 0x007A; 0x00C0, 0x00D6; 0x00D8, 0x00F6;
@@ -140,20 +174,48 @@ let extender =
 let letter = 
    XMLCharSet.union basechar ideographic
 
+(*
+ * [4] NameChar  ::= Letter | Digit | '.' | '-' | '_' | ':' |
+ *                   CombiningChar | Extender
+ * [5] Name      ::= (Letter | '_' | ':') (NameChar)*
+ *)
 let is_first_ncnamechar uchar =
-   XMLCharSet.mem uchar letter || uchar = Uchar.u_underline
+   XMLCharSet.mem uchar letter || uchar = u_underline
 
 let is_ncnamechar uchar =
    XMLCharSet.mem uchar letter || XMLCharSet.mem uchar digit ||
-   uchar = Uchar.u_dot || uchar = Uchar.u_dash || 
-   uchar = Uchar.u_underline || XMLCharSet.mem uchar combiningchar || 
+   uchar = u_dot || uchar = u_dash || 
+   uchar = u_underline || XMLCharSet.mem uchar combiningchar || 
    XMLCharSet.mem uchar extender
 
 let is_first_namechar uchar =
-   is_first_ncnamechar uchar || uchar = Uchar.u_colon
+   is_first_ncnamechar uchar || uchar = u_colon
 
 let is_namechar uchar =
-   uchar = Uchar.u_colon || is_ncnamechar uchar
+   uchar = u_colon || is_ncnamechar uchar
 
-let is_blank uchar =
-   XMLCharSet.mem uchar blank
+(*
+ * [3] S         ::= (#x20 | #x9 | #xD | #xA)+
+ *)
+let is_space = function
+   | 0x20 | 0x09 | 0x0D | 0x0A -> true
+   | _ -> false
+
+(*
+ * [13] PubidChar     ::= #x20 | #xD | #xA | [a-zA-Z0-9]
+ *                        | | [-'()+,./:=?;!*#@$_%]
+ *)
+let is_pubid_char ucs4 =
+   if ucs4 < 0xFF then
+      match Char.chr ucs4 with
+	 | ' ' | '\n' | '\r'
+	 | 'a'..'z'
+	 | 'A'..'Z'
+	 | '0'..'9'
+	 | '-' | '\'' | '(' | ')' | '+' 
+	 | ',' | '.' | '/' | ':' | '=' 
+	 | '?' | ';' | '!' | '*' | '#' 
+	 | '@' | '$' | '_' | '%' -> true
+	 | _ -> false
+   else
+      false

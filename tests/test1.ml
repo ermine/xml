@@ -1,5 +1,5 @@
 (*
- * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 open Conversion
@@ -16,9 +16,9 @@ let _ =
    let comment_handler comment =
       Printf.printf "Comment %s\n" comment
    in
-   let entity_handler name =
+   let entity_resolver name =
       Printf.printf "Entity %s\n" name;
-      Uchar.of_char 'A'
+      "[unknown entity]"
    in
    let character_data_handler cdata =
       Printf.printf "Text %s\n" cdata;
@@ -38,7 +38,7 @@ let _ =
       ~comment_handler
       ~pi_handler
       ~unknown_encoding_handler
-      ~entity_handler
+      ~entity_resolver
       () in
 
    let tin = open_in file in
@@ -50,7 +50,7 @@ let _ =
 	    Xmlparser.finish p
 	 )
 	 else (
-	    Xmlparser.parse p buf 0 size;
+	    Xmlparser.parse p buf size;
 	    aux_cycle ()
 	 )
    in

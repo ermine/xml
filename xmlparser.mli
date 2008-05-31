@@ -1,20 +1,92 @@
 (*
- * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 exception LexerError of string
 exception UnknownEntity of string
 
 type data =
-   | EOB
    | UCS4 of int
+   | EOB
+   | EOD
 
-type external_id = [ `System of string | `Public of string * string ]
+type name = string
+
+type external_id = string * string
+
+type quantify = [
+| `One
+| `Plus
+| `Quest
+| `Star
+]
+
+type contentspec_children = [
+| `Choice of cp list * quantify
+| `Seq of cp list * quantify
+]
+and cp = [
+| `Name of name * quantify
+| `Choice of cp list * quantify
+| `Seq of cp list * quantify
+]
+
+type contentspec = [
+| `EMPTY
+| `ANY
+| `Mixed of name list
+| `Children of contentspec_children
+]
+
+type atttype = [
+| `CDATA
+| `ID
+| `IDREF
+| `IDREFS
+| `ENTITY
+| `ENTITIES
+| `NMTOKEN
+| `NMTOKENS
+| `NOTATION of name list
+| `ENUMERATION of string list
+]
+
+type defaultdecl = [
+| `REQUIRED
+| `IMPLIED
+| `FIXED of string
+| `Default of string
+]
+
+type parameter_entity_value = [
+| `EntityValue of string
+| `ExternalID of external_id
+]
+
+type entity_value = [
+| `EntityValue of string
+| `ExternalID of external_id
+| `UnparsedExternalID of external_id * name
+]
+
+type entitydecl = [
+| `ParameterEntity of name * parameter_entity_value
+| `Entity of name * entity_value
+]
+
+type intsub = [ 
+| `Elementdecl of name * contentspec
+| `AttlistDecl of name * (name * atttype * defaultdecl) list
+| `EntityDecl of entitydecl
+| `NotationDecl of name * external_id
+| `PI of string * string
+| `Comment of string
+]
 
 type dtd = {
-   name : string;
-   external_id : external_id option;
-   intsybset : string
+   dtd_name : string;
+   dtd_external_id : external_id option;
+   dtd_intsubset : intsub list;
 }
 
 type production =
@@ -26,18 +98,19 @@ type production =
   | Whitespace of string
   | Cdata of string
   | Text of string
-  | Doctype of string * external_id option * string
-  | EOD
+  | Doctype of dtd
+  | EndOfData
 
 type cb = production -> ('a -> unit) -> unit as 'a
 
 type parser_t = {
+  mutable is_parsing : bool;
   mutable encoding : string;
   mutable fparser : parser_t -> cb -> unit;
   mutable fencoder : int -> (int, char list) Fstream.t;
-  mutable strm : char Stream.t;
+  mutable strm : char list;
   mutable nextf : cb;
-  entity_handler : string -> int;
+  mutable entity_resolver : string -> string;
   encoding_handler : string -> char -> (char, int) Fstream.t;
 }
 and lstream =
@@ -45,15 +118,19 @@ and lstream =
   | Switch of (char -> (char, int) Fstream.t) * (parser_t -> data -> lstream)
   | Token of production * (parser_t -> data -> lstream)
 
+val string_of_production : production -> string
+
 val create :
   ?encoding:Xmlencoding.encoding ->
   ?process_unknown_encoding:(string -> char -> (char, int) Fstream.t) ->
-  ?process_entity:(string -> int) ->
+  ?entity_resolver:(string -> string) ->
   ?process_production:cb -> unit -> parser_t
 
 val set_callback : parser_t -> cb -> unit
 
-val parse : parser_t -> string -> int -> int -> unit
+val parse : parser_t -> string -> int -> unit
+
+val set_entity_resolver : parser_t -> (string -> string) -> unit
 
 val finish : parser_t -> unit
 

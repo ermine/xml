@@ -1,5 +1,5 @@
 (*
- * (c) 2007 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 open Printf
@@ -43,7 +43,7 @@ let unknown_encoding_handler encoding =
    printf "make_decoder %s\n" encoding;
    Conversion.make_decoder encoding
 
-let entity_handler entity =
+let entity_resolver entity =
    failwith (sprintf "Unknown entity: %s" entity)
 
 let _ =
@@ -57,7 +57,7 @@ let _ =
       ~comment_handler
       ~pi_handler
       ~unknown_encoding_handler
-      ~entity_handler
+      ~entity_resolver
       () in
    let buf = String.create 1024 in
    let rec loop () =
@@ -67,7 +67,8 @@ let _ =
 	    Sax_ns.finish p
 	 )
 	 else (
-	    Sax_ns.parse p buf 0 size;
+	    print_endline ("[" ^ String.sub buf 0 size ^ "]");
+	    Sax_ns.parse p buf size;
 	    loop ()
 	 )
    in

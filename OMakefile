@@ -2,10 +2,6 @@
 
 open ../../config
 
-.SUBDIRS: tests
-
-OCAMLINCLUDES += $(LIBDIR)
-
 OCAMLFLAGS += -rectypes
 
 OCamlGeneratedFiles(xml_encode.ml xml_decode.ml)
@@ -16,11 +12,11 @@ GENERATED_FILES[] =
 
 FILES[] =
    xmlencoding
-   uchar
    xmlchar
    xml_encode
    xml_decode
    xmlparser
+   #xmlp
    xml
    sax
    sax_ns
@@ -47,29 +43,10 @@ OCamlGeneratedFiles(xpath_grammar.ml)
 GENERATED_FILES[] +=
    xpath_grammar.ml
 
-section
-   USE_OCAMLFIND = true
-   OCAMLFINDFLAGS += -syntax camlp4o
-   OCAMLPACKS[] =
-      ulex
-   xpath_ulex.cmx xpath_ulex$(EXT_OBJ):
-   xpath_ulex.cmo:
-   xpath_ulex.cmi:
-
-FILES[] =
-   xpath
-   xpath_grammar
-   xpath_ulex
-LIB = xpath
-
-#section
-#   USE_OCAMLFIND = true
-#   OCAMLPACKS[] =
-#      ulex
-#   .DEFAULT: $(OCamlLibrary $(LIB), $(FILES))
-
 install: makelib
 
 clean:
    $(CLEAN) $(GENERATED_FILES)
+
+.SUBDIRS: tests
 

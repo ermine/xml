@@ -1,5 +1,5 @@
 (*
- * (c) 2007, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 open Xml
@@ -32,7 +32,7 @@ let _ =
 	 if size = 0 then
 	    finish p
 	 else (
-	    parse p s 0 size;
+	    parse p s size;
 	    aux_read ()
 	 )
    in

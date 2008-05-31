@@ -12,7 +12,7 @@ let create
       ~comment_handler
       ~pi_handler
       ~unknown_encoding_handler
-      ~entity_handler
+      ~entity_resolver
       ?(whitespace_preserve=false)
       () =
    let rec process_production tag fparser =
@@ -35,9 +35,9 @@ let create
 	 | EmptyElement (name, attrs) ->
 	      start_element_handler name attrs;
 	      end_element_handler name
-	 | Doctype (name, ext, str) ->
+	 | Doctype _dtd ->
 	      failwith "Unexpected doctype"
-	 | EOD ->
+	 | EndOfData ->
 	      raise End_of_file
       );
       fparser process_production
@@ -47,7 +47,7 @@ let create
 	 | Comment comment ->
 	      comment_handler comment;
 	      fparser process_prolog
-	 | Doctype (name, ext_id, str) ->
+	 | Doctype _dtd ->
 	      fparser process_prolog
 	 | StartElement (name, attrs) ->
 	      start_element_handler name attrs;
@@ -66,12 +66,12 @@ let create
 	      failwith "Unexpected cdata"
 	 | Text _ ->
 	      failwith "Unexpected text"
-	 | EOD ->
+	 | EndOfData ->
 	      failwith "Unexpected EOD"
    in
       Xmlparser.create 
 	 ~process_unknown_encoding:unknown_encoding_handler
-	 ~process_entity:entity_handler
+	 ~entity_resolver
 	 ~process_production:process_prolog
 	    ()
 

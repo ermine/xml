@@ -125,7 +125,7 @@ let reparent_nodes refel nodes =
    List.iter (reparent refel) (List.rev nodes)
 
 let create_dom ?(whitespace_preserve=false) 
-      ~unknown_encoding_handler ~entity_handler 
+      ~unknown_encoding_handler ~entity_resolver
       ~callback () =
 
    let namespaces = Hashtbl.create 1 in
@@ -175,7 +175,7 @@ let create_dom ?(whitespace_preserve=false)
 		    fparser (process_epiloque (node :: nodes))
 	      else
 		 fparser (process_epiloque nodes)
-	 | Xmlparser.EOD ->
+	 | Xmlparser.EndOfData ->
 	      reparent_nodes root (List.rev nodes);
 	      callback root
 	 | _ ->
@@ -240,9 +240,9 @@ let create_dom ?(whitespace_preserve=false)
 	 | Xmlparser.Cdata cdata -> 
 	      let node = new_text cdata in
 		 fparser (get_node qname (node :: nodes) nextf)
-	 | Xmlparser.Doctype (qname, ext, str) -> 
+	 | Xmlparser.Doctype _dtd ->
               failwith "Doctype declaration inside of element"
-	 | Xmlparser.EOD ->
+	 | Xmlparser.EndOfData ->
 	      failwith "Unexpected end of data"
    in
    let rec process_prolog nodes tag fparser =
@@ -250,9 +250,12 @@ let create_dom ?(whitespace_preserve=false)
 	 | Xmlparser.Comment comment ->
 	      let node = new_comment comment in
 		 fparser (process_prolog (node :: nodes))
-	 | Xmlparser.Doctype (name, ext_id, str) ->
+	 | Xmlparser.Doctype _dtd ->
 	      (* todo *)
 	      fparser (process_prolog nodes)
+	 | Xmlparser.Pi (target, data) ->
+	      let node = new_pi target data in
+		 fparser (process_prolog (node :: nodes))
 	 | Xmlparser.StartElement (name, attrs) ->
 	      let lnss, attrs = split_attrs attrs in
 		 add_namespaces namespaces lnss;
@@ -288,14 +291,14 @@ let create_dom ?(whitespace_preserve=false)
 		    fparser (process_prolog (node :: nodes))
 	      else
 		 fparser (process_prolog nodes)
-	 | Xmlparser.EOD ->
+	 | Xmlparser.EndOfData ->
 	      failwith "Unexpected end of data"
 	 | _ ->
 	      failwith "Unexpected tag"
    in      
       Xmlparser.create 
 	 ~process_unknown_encoding:unknown_encoding_handler
-	 ~process_entity:entity_handler
+	 ~entity_resolver
 	 ~process_production:(process_prolog [])
 	    ()
 

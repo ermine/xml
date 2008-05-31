@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 open Xml
@@ -16,7 +16,7 @@ let create
       ~comment_handler
       ~pi_handler
       ~unknown_encoding_handler
-      ~entity_handler
+      ~entity_resolver
       ?(whitespace_preserve=false)
       () =
    let namespaces = Hashtbl.create 1 in
@@ -65,9 +65,9 @@ let create
 			   raise (Error (Printf.sprintf 
 					 "Bad end element: expected %s, was %s\n"
 					 expected name))
-	  | Doctype (name, ext, str) ->
+	  | Doctype _dtd ->
 	       failwith "Unexpected DOCTYPE"
-	  | EOD ->
+	  | EndOfData ->
 	       raise End_of_file
       );
       fparser process_production
@@ -77,7 +77,7 @@ let create
 	 | Comment comment ->
 	      comment_handler comment;
 	      fparser process_prolog
-	 | Doctype (name, ext_id, str) ->
+	 | Doctype _dtd ->
 	      fparser process_prolog
 	 | Pi (target, data) ->
 	      pi_handler target data;
@@ -88,14 +88,14 @@ let create
 	      fparser process_prolog
 	 | EmptyElement (name, attrs) ->
 	      process_production tag fparser
-	 | EOD ->
+	 | EndOfData ->
 	      raise End_of_file
 	 | _ ->
 	      failwith "Unexpected tag"
    in	      
       Xmlparser.create 
 	 ~process_unknown_encoding:unknown_encoding_handler
-	 ~process_entity:entity_handler
+	 ~entity_resolver
 	 ~process_production:process_prolog
 	    ()
 

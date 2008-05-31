@@ -1,12 +1,16 @@
 (*
- * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * 
+ * http://www.w3.org/TR/xml (fourth edition)
+ * http://www.w3.org/TR/REC-xml-names
  *)
 
 exception NonXmlelement
 exception InvalidNS
 
 type namespace = [
-| `URI of string
+| 
+`URI of string
 | `None
 ]
 
@@ -291,14 +295,16 @@ let process_production callback =
 	      let el = Xmlelement (qname, attrs, []) in
 		 remove_namespaces namespaces lnss;
 		 fparser (process_epiloque el)
-	 | Xmlparser.EOD ->
+	 | Xmlparser.EndOfData ->
 	      raise End_of_file
 	 | _ ->
 	      failwith "Unexpected tag"
       
-   and  get_childs qname nextf childs tag fparser =
+   and get_childs qname nextf childs tag fparser =
       match tag with
-	 | Xmlparser.Whitespace str
+	 | Xmlparser.Whitespace str ->
+print_endline ("whitespace [" ^ str ^ "]");
+	      fparser (get_childs qname nextf (Xmlcdata str :: childs))
 	 | Xmlparser.Text str
 	 | Xmlparser.Cdata str -> 
 	      fparser (get_childs qname nextf (Xmlcdata str :: childs))
@@ -307,7 +313,7 @@ let process_production callback =
 		 parse_element_head namespaces name attrs in
 	      let newnextf childs' fparser =
 		 let child = 
-		    Xmlelement (qname', attrs, List.rev childs') in
+		    Xmlelement (qname', attrs, childs') in
 		    remove_namespaces namespaces lnss;
 		    fparser (get_childs qname nextf (child :: childs))
 	      in
@@ -329,9 +335,9 @@ let process_production callback =
 	 | Xmlparser.Comment _
 	 | Xmlparser.Pi _ ->
 	      fparser (get_childs qname nextf childs)
-	 | Xmlparser.Doctype (qname, ext, str) -> 
+	 | Xmlparser.Doctype _dtd ->
               failwith "Doctype declaration inside of element"
-	 | Xmlparser.EOD ->
+	 | Xmlparser.EndOfData ->
 	      raise End_of_file
 
    and process_epiloque el tag fparser =
@@ -340,7 +346,7 @@ let process_production callback =
 	 | Xmlparser.Pi _
 	 | Xmlparser.Whitespace _ ->
 	      fparser (process_epiloque el)
-	 | Xmlparser.EOD ->
+	 | Xmlparser.EndOfData ->
 	      callback el
 	 | _ ->
 	      failwith "Invalid epiloque"
@@ -348,21 +354,21 @@ let process_production callback =
       process_prolog
 
 
-let create_parser ?unknown_encoding_handler ?unknown_entity_handler callback =
+let create_parser ?unknown_encoding_handler ?entity_resolver callback =
    Xmlparser.create 
       ?process_unknown_encoding:unknown_encoding_handler
-      ?process_entity:unknown_entity_handler
+      ?entity_resolver:entity_resolver
       ~process_production:(process_production callback) ()
 
 let parse = Xmlparser.parse
 
 let finish = Xmlparser.finish
 
-let parse_document ?unknown_encoding_handler ?unknown_entity_handler
+let parse_document ?unknown_encoding_handler ?entity_resolver
       buf callback =
    let p = Xmlparser.create 
       ?process_unknown_encoding:unknown_encoding_handler
-      ?process_entity:unknown_entity_handler
+      ?entity_resolver
       ~process_production:(process_production callback) () in
-      Xmlparser.parse p buf 0 (String.length buf);
+      Xmlparser.parse p buf (String.length buf);
       Xmlparser.finish p
