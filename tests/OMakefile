@@ -1,14 +1,10 @@
 .PHONY: testlib clean
 
-open ../../../config
-
 TESTS[] =
    test1
    test2
    test3
    light_test
-
-#OCAMLINCLUDES += ..
 
 #OCAMLFLAGS += -rectypes
 

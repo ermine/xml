@@ -1,6 +1,4 @@
-.PHONY: makelib install clean
-
-open ../../config
+.PHONY: makelib install testlib clean
 
 OCAMLFLAGS += -rectypes
 
