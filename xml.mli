@@ -9,6 +9,7 @@ type namespace = [ `None | `URI of string ]
 type prefix = string
 type ncname = string
 type qname = namespace * ncname
+type name = ncname
 type cdata = string
 type attribute = qname * cdata
 
@@ -29,7 +30,7 @@ module Serialization :
       bindings : (string, string) Hashtbl.t;
     }
     val bind_prefix : t -> string -> namespace -> unit
-    val init : namespace list -> t
+    val create : namespace list -> t
     val string_of_qname : t -> qname -> string
     val string_of_attr : t -> attribute -> string
     val string_of_list : ('a -> string) -> string -> 'a list -> string
@@ -41,12 +42,12 @@ module Serialization :
     val serialize_document : t -> (string -> unit) -> element -> unit
   end
 
-val get_tag : element -> qname
+val get_qname : element -> qname
 val get_namespace : qname -> namespace
 val get_name : qname -> string
-val get_attrs : element -> attribute list
-val get_attr_value : qname -> attribute list -> string
-val safe_get_attr_value : qname -> attribute list -> string
+val get_attrs : ?ns:namespace -> element -> attribute list
+val get_attr_value : ?ns:namespace -> name -> attribute list -> string
+val safe_get_attr_value : ?ns:namespace -> name -> attribute list -> string
 val get_element : qname -> element list -> element
 val get_elements : qname -> element list -> element list
 val get_children : element -> element list
@@ -56,6 +57,7 @@ val get_first_element : element list -> element
 val get_cdata : element -> string
 val remove_cdata : element list -> element list
 val make_element : qname -> attribute list -> element list -> element
+val make_attr: ?ns:namespace -> string -> string -> attribute
 val make_simple_cdata : qname -> cdata -> element
 val mem_qname : qname -> element list -> bool
 val mem_child : qname -> element -> bool

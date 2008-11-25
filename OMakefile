@@ -14,7 +14,6 @@ FILES[] =
    xml_encode
    xml_decode
    xmlparser
-   #xmlp
    xml
    sax
    sax_ns

@@ -1,18 +1,13 @@
-.PHONY: testlib clean
-
 TESTS[] =
    test1
    test2
    test3
    light_test
 
-#OCAMLFLAGS += -rectypes
-
 foreach(name, $(TESTS))
    OCAML_OTHER_LIBS = fstream ini_config conversion
    OCAML_LIBS = ../xml
    OCamlProgram($(name), $(name))
-   $(name)$(EXE): $(addsuffix .ml, $(name))
 
 testlib: $(TESTS)
 
