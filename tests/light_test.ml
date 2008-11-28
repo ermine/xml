@@ -8,8 +8,7 @@ let unknown_encoding_handler encoding =
   Printf.printf "make_decoder %s\n" encoding;
   Conversion.make_decoder encoding
     
-let callback xml =
-  print_endline "parsed";
+let print_result xml =
   let ser = Xml.Serialization.create [] in
   let buf = Buffer.create 80 in
   let out str =
@@ -25,16 +24,11 @@ let callback xml =
 let _ =
   let file = Sys.argv.(1) in
   let f_in = open_in file in
-  let p = create_parser ~unknown_encoding_handler callback in
-  let s = String.create 1024 in
-  let rec aux_read () =
-    let size = input f_in s 0 1024 in
-      if size = 0 then
-        finish p
-      else (
-        parse p s size;
-        aux_read ()
-      )
-  in
-    aux_read ()
-      
+  let buf = Buffer.create 8126 in
+    (try while true do
+       Buffer.add_string buf (input_line f_in)
+     done
+     with End_of_file -> close_in f_in);
+    let doc = parse_document (Buffer.contents buf) in
+      print_result doc
+    

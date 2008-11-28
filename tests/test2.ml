@@ -5,22 +5,16 @@
 open Printf
 open Xml
 
+let string_of_ns = function
+  | `URI uri -> Printf.sprintf "URI %S" uri
+  | `None -> "None"
+
 let start_ns_handler (ns, prefix) =
-  printf "NS start %s %s\n" prefix (match ns with
-                                      | `URI uri -> "URI " ^ uri
-                                      | `None -> "None"
-                                   )
+  printf "NS start %s %s\n" prefix (string_of_ns ns)
     
 let end_ns_handler (ns, prefix) =
-  printf "NS end %s %s\n" prefix (match ns with
-                                    | `URI uri -> "URI " ^ uri
-                                    | `None -> "None"
-                                 )
+  printf "NS end %s %s\n" prefix (string_of_ns ns)
     
-let string_of_ns = function
-  | `None -> ""
-  | `URI str -> "URI " ^ str
-      
 let start_element_handler (ns, lname) attrs =
   printf "StartElement (%s) %s\n" (string_of_ns ns) lname;
   List.iter (fun ((ns, lname), value) ->
@@ -31,7 +25,7 @@ let end_element_handler (ns, lname) =
   printf "EndElement (%s) %s\n" (string_of_ns ns) lname
     
 let character_data_handler cdata =
-  printf "Cdata [%s]\n" cdata
+  printf "Cdata %S\n" cdata
 
 let comment_handler comment =
   printf "Comment %s\n" comment
@@ -48,7 +42,7 @@ let entity_resolver entity =
     
 let _ =
   let fin = open_in Sys.argv.(1) in
-  let p = Sax_ns.create
+  let state = Sax_ns.create
     ~start_ns_handler
     ~end_ns_handler
     ~start_element_handler
@@ -58,19 +52,20 @@ let _ =
     ~pi_handler
     ~unknown_encoding_handler
     ~entity_resolver
-    () in
+    ~whitespace_preserve:true () in
+    
   let buf = String.create 1024 in
-  let rec loop () =
+  let rec loop state =
     let size = input fin buf 0 70 in
       if size = 0 then (
         close_in fin;
-        Sax_ns.finish p
+        ignore (Sax_ns.parse ~finish:true state)
       )
       else (
         print_endline ("[" ^ String.sub buf 0 size ^ "]");
-        Sax_ns.parse p buf size;
-        loop ()
+        let state = Sax_ns.parse ~buf:(String.sub buf 0 size) state in
+          loop state
       )
   in
-    loop ()
+    loop state
       

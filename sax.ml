@@ -6,76 +6,114 @@ open Xml
 open Xmlparser
 
 let create
-      ~start_element_handler
-      ~end_element_handler
-      ~character_data_handler
-      ~comment_handler
-      ~pi_handler
-      ~unknown_encoding_handler
-      ~entity_resolver
-      ?(whitespace_preserve=false)
-      () =
-   let rec process_production tag fparser =
-      (match tag with
-	  | Pi (target, data) ->
-	       pi_handler target data;
-	  | Comment comment ->
-	       comment_handler comment;
-	  | Cdata cdata ->
-	       character_data_handler cdata;
-	  | Text text ->
-	       character_data_handler text;
-	 | Whitespace space ->
-	      if whitespace_preserve then
-		 character_data_handler space
-	 | StartElement (name, attrs) ->
-	      start_element_handler name attrs;
-	 | EndElement name ->
-	      end_element_handler name;
-	 | EmptyElement (name, attrs) ->
-	      start_element_handler name attrs;
-	      end_element_handler name
-	 | Doctype _dtd ->
-	      failwith "Unexpected doctype"
-	 | EndOfData ->
-	      raise End_of_file
-      );
-      fparser process_production
-   in
-   let rec process_prolog tag fparser =
-      match tag with
-	 | Comment comment ->
-	      comment_handler comment;
-	      fparser process_prolog
-	 | Doctype _dtd ->
-	      fparser process_prolog
-	 | StartElement (name, attrs) ->
-	      start_element_handler name attrs;
-	      fparser process_production
-	 | Whitespace space ->
-	      fparser process_prolog
-	 | EmptyElement (name, attrs) ->
-	      start_element_handler name attrs;
-	      end_element_handler name
-	 | Pi (target, data) ->
-	      pi_handler target data;
-	      fparser process_prolog
-	 | EndElement tag ->
-	      failwith ("Unexpected </" ^ tag ^ ">")
-	 | Cdata _ ->
-	      failwith "Unexpected cdata"
-	 | Text _ ->
-	      failwith "Unexpected text"
-	 | EndOfData ->
-	      failwith "Unexpected EOD"
-   in
-      Xmlparser.create 
-	 ~process_unknown_encoding:unknown_encoding_handler
-	 ~entity_resolver
-	 ~process_production:process_prolog
-	    ()
+    ?encoding
+    ?unknown_encoding_handler
+    ?entity_resolver
+    ~start_element_handler
+    ~end_element_handler
+    ~character_data_handler
+    ~comment_handler
+    ~pi_handler
+    ?(whitespace_preserve=false) () =
 
-let parse = Xmlparser.parse
-let set_callback = Xmlparser.set_callback
-let finish = Xmlparser.finish
-let reset = Xmlparser.reset
+  let stack = Stack.create () in
+    
+  let rec process_production (tag, state) =
+    match tag with
+      | Pi (target, data) ->
+          pi_handler target data;
+          process_production (parse state)
+      | Comment comment ->
+          comment_handler comment;
+          process_production (parse state)
+      | Cdata cdata ->
+          character_data_handler cdata;
+          process_production (parse state)
+      | Text text ->
+          character_data_handler text;
+          process_production (parse state)
+      | Whitespace space ->
+          if whitespace_preserve then
+            character_data_handler space;
+          process_production (parse state)
+      | StartElement (name, attrs) ->
+          Stack.push name stack;
+          start_element_handler name attrs;
+          process_production (parse state)
+      | EndElement name ->
+          let name' = Stack.pop stack in
+            if name = name' then
+              end_element_handler name
+            else
+              failwith "Unmatched end tag name";
+            if Stack.is_empty stack then
+              process_epilogue (parse state)
+            else
+              process_production (parse state)
+      | EmptyElement (name, attrs) ->
+          start_element_handler name attrs;
+          end_element_handler name;
+          process_production (parse state)
+      | Doctype _dtd ->
+          failwith "Unexpected doctype"
+      | EndOfBuffer ->
+          process_production, state
+      | EndOfData ->
+          raise End_of_file
+
+  and process_epilogue (tag, state) =
+    match tag with
+      | Comment comment ->
+          comment_handler comment;
+          process_epilogue (parse state)
+      | Pi (target, data) ->
+          pi_handler target data;
+          process_epilogue (parse state)
+      | Whitespace space ->
+          if whitespace_preserve then
+            character_data_handler space;
+          process_epilogue (parse state)
+      | EndOfBuffer ->
+          process_epilogue, state
+      | EndOfData ->
+          raise End_of_file
+      | _ ->
+          failwith "Unexpected tag in epilogue"
+          
+  and process_prolog (tag, state) =
+   match tag with
+      | Comment comment ->
+          comment_handler comment;
+          process_prolog (parse state)
+      | Doctype _dtd ->
+          process_prolog (parse state)
+      | StartElement (name, attrs) ->
+          process_production (tag, state)
+      | Whitespace space ->
+          process_prolog (parse state)
+      | EmptyElement (name, attrs) ->
+          start_element_handler name attrs;
+          end_element_handler name;
+          process_epilogue (parse state)
+      | Pi (target, data) ->
+          pi_handler target data;
+          process_prolog (parse state)
+      | EndElement tag ->
+          failwith ("Unexpected </" ^ tag ^ ">")
+      | Cdata _ ->
+          failwith "Unexpected cdata"
+      | Text _ ->
+          failwith "Unexpected text"
+      | EndOfBuffer ->
+          process_prolog, state
+      | EndOfData ->
+          raise End_of_file
+  in
+  let state = Xmlparser.create
+    ?encoding ?unknown_encoding_handler ?entity_resolver () in
+    (process_prolog, state) 
+      
+let parse ?buf ?finish (callback, state) =
+  callback (Xmlparser.parse ?buf ?finish state)
+
+let reset (_, state) = Xmlparser.reset state

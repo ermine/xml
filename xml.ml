@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  * 
  * http://www.w3.org/TR/xml (fourth edition)
  * http://www.w3.org/TR/REC-xml-names
@@ -284,59 +284,60 @@ let string_of_tag (ns, name) =
   in
     Printf.sprintf "(%S) %s" prefix name
       
-let process_production callback =
+let process_production (tag, state) =
   let namespaces = Hashtbl.create 1 in
   let () = Hashtbl.add namespaces "xml" ns_xml in
     
-  let rec process_prolog tag fparser =
+  let rec process_prolog (tag, state) =
     match tag with
       | Xmlparser.Comment _
       | Xmlparser.Doctype _
       | Xmlparser.Pi _
       | Xmlparser.Whitespace _ ->
-          fparser process_prolog
+          process_prolog (Xmlparser.parse state)
       | Xmlparser.StartElement (name, attrs) ->
           let qname, lnss, attrs = 
             parse_element_head namespaces name attrs in
-          let nextf childs fparser =
+          let nextf childs (tag, state) =
             let el = Xmlelement (qname, attrs, childs) in
               remove_namespaces namespaces lnss;
-              fparser (process_epiloque el)
+              process_epilogue el (tag, state)
           in
-            fparser (get_childs qname nextf [])
+            get_childs qname nextf [] (Xmlparser.parse state)
       | Xmlparser.EmptyElement (name, attrs) ->
           let qname, lnss, attrs = 
             parse_element_head namespaces name attrs in
           let el = Xmlelement (qname, attrs, []) in
             remove_namespaces namespaces lnss;
-            fparser (process_epiloque el)
+            process_epilogue el (Xmlparser.parse state)
+      | Xmlparser.EndOfBuffer ->
+          failwith "End of Buffer"
       | Xmlparser.EndOfData ->
           raise End_of_file
       | _ ->
           failwith "Unexpected tag"
             
-  and get_childs qname nextf childs tag fparser =
+  and get_childs qname nextf childs (tag, state) =
     match tag with
       | Xmlparser.Whitespace str ->
-          print_endline ("whitespace [" ^ str ^ "]");
-          fparser (get_childs qname nextf (Xmlcdata str :: childs))
+          get_childs qname nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
       | Xmlparser.Text str
       | Xmlparser.Cdata str -> 
-          fparser (get_childs qname nextf (Xmlcdata str :: childs))
+          get_childs qname nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
       | Xmlparser.StartElement (name, attrs) ->
           let qname', lnss, attrs = 
             parse_element_head namespaces name attrs in
-          let newnextf childs' fparser =
+          let newnextf childs' (tag, state) =
             let child = 
               Xmlelement (qname', attrs, childs') in
               remove_namespaces namespaces lnss;
-              fparser (get_childs qname nextf (child :: childs))
+              get_childs qname nextf (child :: childs) (Xmlparser.parse state)
           in
-            fparser (get_childs qname' newnextf [])
+            get_childs qname' newnextf [] (Xmlparser.parse state)
       | Xmlparser.EndElement name ->
           let qname' = parse_qname namespaces (Xmlparser.split_name name) in
             if qname = qname' then
-              nextf (List.rev childs) fparser
+              nextf (List.rev childs) (Xmlparser.parse state)
             else 
               failwith (Printf.sprintf "Bad end tag: expected %s, was %s"
                           (string_of_tag qname)
@@ -346,43 +347,33 @@ let process_production callback =
             parse_element_head namespaces name attrs in
           let child = Xmlelement (qname', attrs, []) in
             remove_namespaces namespaces lnss;
-            fparser (get_childs qname nextf (child :: childs))
+            get_childs qname nextf (child :: childs) (Xmlparser.parse state)
       | Xmlparser.Comment _
       | Xmlparser.Pi _ ->
-          fparser (get_childs qname nextf childs)
+          get_childs qname nextf childs (Xmlparser.parse state)
       | Xmlparser.Doctype _dtd ->
           failwith "Doctype declaration inside of element"
+      | Xmlparser.EndOfBuffer ->
+          failwith "End of Buffer"
       | Xmlparser.EndOfData ->
           raise End_of_file
             
-  and process_epiloque el tag fparser =
+  and process_epilogue el (tag, state) =
     match tag with
       | Xmlparser.Comment _
       | Xmlparser.Pi _
       | Xmlparser.Whitespace _ ->
-          fparser (process_epiloque el)
+          process_epilogue el (Xmlparser.parse state)
+      | Xmlparser.EndOfBuffer ->
+          failwith "End Of Buffer"
       | Xmlparser.EndOfData ->
-          callback el
+          el
       | _ ->
-          failwith "Invalid epiloque"
+          failwith "Invalid epilogue"
   in
-    process_prolog
+    process_prolog (tag, state)
 
-let create_parser ?unknown_encoding_handler ?entity_resolver callback =
-  Xmlparser.create 
-    ?process_unknown_encoding:unknown_encoding_handler
-    ?entity_resolver:entity_resolver
-    ~process_production:(process_production callback) ()
-    
-let parse = Xmlparser.parse
-  
-let finish = Xmlparser.finish
-  
-let parse_document ?unknown_encoding_handler ?entity_resolver buf callback =
-  let p = Xmlparser.create 
-    ?process_unknown_encoding:unknown_encoding_handler
-    ?entity_resolver
-    ~process_production:(process_production callback) () in
-    Xmlparser.parse p buf (String.length buf);
-    Xmlparser.finish p
+let parse_document ?unknown_encoding_handler ?entity_resolver buf =
+  let p = Xmlparser.create ?unknown_encoding_handler ?entity_resolver () in
+    process_production (Xmlparser.parse ~buf ~finish:true p)
       

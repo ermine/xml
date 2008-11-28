@@ -7,51 +7,52 @@ open Sax
 
 let _ =
   let start_element_handler tag attrs =
-    Printf.printf "StartTag %s\n" tag;
-    List.iter (fun (k,v) -> Printf.printf "   %s=%s\n" k v) attrs
+    Printf.printf "<%s" tag;
+    List.iter (fun (k,v) -> Printf.printf " %s='%s'\ " k v) attrs;
+    Printf.printf ">";
   in
   let end_element_handler tag =
-    Printf.printf "EndTag %s\n" tag;
+    Printf.printf "</%s>" tag;
   in
   let comment_handler comment =
-    Printf.printf "Comment %s\n" comment
+    Printf.printf "<!-- %s -->" comment
   in
   let entity_resolver name =
-    Printf.printf "Entity %s\n" name;
+    Printf.printf "Entity %s" name;
     "[unknown entity]"
   in
   let character_data_handler cdata =
-    Printf.printf "Text %s\n" cdata;
+    Printf.printf "%s" cdata;
   in
   let unknown_encoding_handler encoding =
-    Printf.printf "make_decoder %s\n" encoding;
+    Printf.printf "make_decoder %s" encoding;
     Conversion.make_decoder encoding
   in
   let pi_handler target data =
-    Printf.printf "Pi %s %s\n" target data
+    Printf.printf "<?%s %s?>" target data
   in
   let file = Sys.argv.(1) in
-  let p = Sax.create
+  let tin = open_in file in
+  let state = Sax.create
+    ~unknown_encoding_handler
+    ~entity_resolver 
     ~start_element_handler
     ~end_element_handler
     ~character_data_handler
     ~comment_handler
     ~pi_handler
-    ~unknown_encoding_handler
-    ~entity_resolver
-      () in
+    ~whitespace_preserve:true () in
     
-  let tin = open_in file in
-  let rec aux_cycle () =
+  let rec aux_cycle state =
     let buf = String.create 10 in
     let size = input tin buf 0 10 in
       if size = 0 then (
         close_in tin;
-        Xmlparser.finish p
+        ignore (Sax.parse ~finish:true state)
       )
       else (
-        Xmlparser.parse p buf size;
-        aux_cycle ()
+        let state = Sax.parse ~buf:(String.sub buf 0 size)  state in
+          aux_cycle state
       )
   in
-    aux_cycle ()
+    aux_cycle state

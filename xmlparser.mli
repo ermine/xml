@@ -76,6 +76,7 @@ type entitydecl = [
 
 type intsub = [ 
 | `Elementdecl of name * contentspec
+| `DeclSect of name
 | `AttlistDecl of name * (name * atttype * defaultdecl) list
 | `EntityDecl of entitydecl
 | `NotationDecl of name * external_id
@@ -99,19 +100,18 @@ type production =
   | Cdata of string
   | Text of string
   | Doctype of dtd
+  | EndOfBuffer
   | EndOfData
 
-type cb = production -> ('a -> unit) -> unit as 'a
-
 type parser_t = {
-  mutable is_parsing : bool;
-  mutable encoding : string;
-  mutable fparser : parser_t -> cb -> unit;
+  is_parsing : bool;
+  finish: bool;
+  strm : char Stream.t;
+  fparser : parser_t -> char Stream.t -> (production * parser_t);
+  encoding : string;
   mutable fencoder : int -> (int, char list) Fstream.t;
-  mutable strm : char list;
-  mutable nextf : cb;
-  mutable entity_resolver : string -> string;
-  encoding_handler : string -> char -> (char, int) Fstream.t;
+  entity_resolver : string -> string;
+  encoding_handler : string -> (char -> (char, int) Fstream.t);
 }
 and lstream =
     Lexer of (parser_t -> data -> lstream)
@@ -122,19 +122,16 @@ val string_of_production : production -> string
 
 val create :
   ?encoding:Xmlencoding.encoding ->
-  ?process_unknown_encoding:(string -> char -> (char, int) Fstream.t) ->
-  ?entity_resolver:(string -> string) ->
-  ?process_production:cb -> unit -> parser_t
+  ?unknown_encoding_handler:(string -> char -> (char, int) Fstream.t) ->
+  ?entity_resolver:(string -> string) -> unit -> parser_t
 
-val set_callback : parser_t -> cb -> unit
+val parse : ?buf:string -> ?finish:bool -> parser_t -> (production * parser_t)
 
-val parse : parser_t -> string -> int -> unit
+val parse_dtd : string -> production * parser_t
 
-val set_entity_resolver : parser_t -> (string -> string) -> unit
+val set_entity_resolver : parser_t -> (string -> string) -> parser_t
 
-val finish : parser_t -> unit
-
-val reset : parser_t -> cb -> unit
+val reset : parser_t -> parser_t
 
 val get_rest_buffer : parser_t -> string
 

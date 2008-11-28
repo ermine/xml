@@ -19,6 +19,16 @@ FILES[] =
    sax_ns
    dom
    
+section
+   OCAMLPPFLAGS = -pp camlp4o
+   OCAMLDEPFLAGS += -pp camlp4o
+   OCAMLINCLUDES += +camlp4
+   xmlparser.cmx xmlparser$(EXT_OBJ):
+   xmlparser.cmo:
+   xmlparser.cml:
+
+OCAMLFLAGS += -pp camlp4o
+
 LIB = xml
 
 .DEFAULT: $(OCamlLibrary $(LIB), $(FILES))

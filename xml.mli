@@ -84,14 +84,6 @@ val parse_element_head :
   qname * (namespace * prefix) list * attribute list
 val string_of_tag : qname -> string
 
-val create_parser :
-  ?unknown_encoding_handler:(string -> char -> (char, int) Fstream.t) ->
-  ?entity_resolver:(string -> string) ->
-  (element -> unit) -> Xmlparser.parser_t
-val parse : Xmlparser.parser_t -> string -> int -> unit
-val finish : Xmlparser.parser_t -> unit
-
 val parse_document :
   ?unknown_encoding_handler:(string -> char -> (char, int) Fstream.t) ->
-  ?entity_resolver:(string -> string) ->
-  string -> (element -> unit) -> unit
+  ?entity_resolver:(string -> string) -> string -> element

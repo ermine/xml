@@ -3,6 +3,7 @@ TESTS[] =
    test2
    test3
    light_test
+   dtdtest
 
 foreach(name, $(TESTS))
    OCAML_OTHER_LIBS = fstream ini_config conversion
