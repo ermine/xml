@@ -45,11 +45,6 @@ ALIBS[] =
 
 LibInstall(makelib, $(LIB), $(IFILES), $(ALIBS))
 
-OCamlGeneratedFiles(xpath_grammar.ml)
-
-GENERATED_FILES[] +=
-   xpath_grammar.ml
-
 install: makelib
 
 clean:

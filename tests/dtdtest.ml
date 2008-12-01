@@ -10,16 +10,26 @@ let print_result data =
 
 let _ =
   let file = Sys.argv.(1) in
-  let buf = Buffer.create 8129 in
-  let tin = open_in file in
-    (try while true do Buffer.add_string buf (input_line tin) done
-     with End_of_file -> close_in tin);
-    let data = Buffer.contents buf in
-    let process_production (tag, state) =
-      match tag with
-        | Doctype dtd ->
-            print_result dtd.dtd_intsubset
-        | _ ->
-            failwith (string_of_production tag)
-    in
-      process_production (parse_dtd data)
+  let f_in = open_in file in
+  let buf = Buffer.create 8129 in    
+  let str = String.create 1024 in
+  let rec read_file () =
+    let size = input f_in str 0 1024 in
+      if size = 0 then (
+        close_in f_in;
+        Buffer.contents buf
+      )
+      else (
+        Buffer.add_string buf (String.sub str 0 size);
+        read_file ()
+      )
+  in
+  let data = read_file () in
+  let process_production (tag, state) =
+    match tag with
+      | Doctype dtd ->
+          print_result dtd.dtd_intsubset
+      | _ ->
+          failwith (string_of_production tag)
+  in
+    process_production (parse_dtd data)

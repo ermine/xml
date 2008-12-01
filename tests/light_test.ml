@@ -4,10 +4,6 @@
 
 open Xml
 
-let unknown_encoding_handler encoding =
-  Printf.printf "make_decoder %s\n" encoding;
-  Conversion.make_decoder encoding
-    
 let print_result xml =
   let ser = Xml.Serialization.create [] in
   let buf = Buffer.create 80 in
@@ -25,10 +21,19 @@ let _ =
   let file = Sys.argv.(1) in
   let f_in = open_in file in
   let buf = Buffer.create 8126 in
-    (try while true do
-       Buffer.add_string buf (input_line f_in)
-     done
-     with End_of_file -> close_in f_in);
-    let doc = parse_document (Buffer.contents buf) in
-      print_result doc
+  let str = String.create 1024 in
+  let rec read_file () =
+    let size = input f_in str 0 1024 in
+      if size = 0 then (
+        close_in f_in;
+        Buffer.contents buf
+      )
+      else (
+        Buffer.add_string buf (String.sub str 0 size);
+        read_file ()
+      )
+  in
+  let data = read_file () in
+  let doc = parse_document data in
+    print_result doc
     

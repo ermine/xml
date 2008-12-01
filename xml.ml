@@ -9,8 +9,7 @@ exception NonXmlelement
 exception InvalidNS
 
 type namespace = [
-| 
-`URI of string
+| `URI of string
 | `None
 ]
 
@@ -46,8 +45,7 @@ struct
    let bind_prefix t prefix namespace =
      match namespace with
        | `None -> raise InvalidNS
-       | `URI str ->
-           Hashtbl.add t.bindings str prefix
+       | `URI str -> Hashtbl.add t.bindings str prefix
              
    let create default_nss =
      let bindings = Hashtbl.create 5 in
@@ -331,7 +329,7 @@ let process_production (tag, state) =
             let child = 
               Xmlelement (qname', attrs, childs') in
               remove_namespaces namespaces lnss;
-              get_childs qname nextf (child :: childs) (Xmlparser.parse state)
+              get_childs qname nextf (child :: childs) (tag, state)
           in
             get_childs qname' newnextf [] (Xmlparser.parse state)
       | Xmlparser.EndElement name ->

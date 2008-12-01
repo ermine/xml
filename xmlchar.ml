@@ -34,13 +34,13 @@ let u_9 = of_char '9'
 let u_plus = of_char '+'
 let u_comma = of_char ','
 
-(*
- * [2] Char      ::= #x9 | #xA | #xD |  /* any Unicode character,
- *                   [#x20-#xD7FF] |    excluding the surrogate blocks,
- *                   [#xE000-#xFFFD] |  FFFE, and FFFF. */
- *                   [#x10000-#x10FFFF]
- *)
 
+(*
+ * [2] Char    ::=    #x9 | #xA | #xD |  /* any Unicode character,
+ *                    [#x20-#xD7FF] |    excluding the surrogate blocks,
+ *                    [#xE000-#xFFFD] |  FFFE, and FFFF. */
+ *                    [#x10000-#x10FFFF]
+ *)
 let is_xmlchar = function
   | 0x9 
   | 0xA
@@ -49,7 +49,7 @@ let is_xmlchar = function
   | u when u >= 0xE000 && u <= 0xFFFD -> true
   | u when u >= 0x10000 && u <= 0x10FFFF -> true
   | _ -> false
-      
+
 module U =
 struct
   type t = int
@@ -197,7 +197,7 @@ let is_namechar uchar =
 (*
  * [3] S         ::= (#x20 | #x9 | #xD | #xA)+
  *)
-let is_space = function
+  let is_space = function
   | 0x20 | 0x09 | 0x0D | 0x0A -> true
   | _ -> false
       

@@ -85,16 +85,16 @@ type intsub = [
 ]
 
 type dtd = {
-   dtd_name : string;
+   dtd_name : name;
    dtd_external_id : external_id option;
    dtd_intsubset : intsub list;
 }
 
 type production =
-    StartElement of string * (string * string) list
-  | EndElement of string
-  | EmptyElement of string * (string * string) list
-  | Pi of string * string
+    StartElement of name * (name * string) list
+  | EndElement of name
+  | EmptyElement of name * (name * string) list
+  | Pi of name * string
   | Comment of string
   | Whitespace of string
   | Cdata of string

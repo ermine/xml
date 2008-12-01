@@ -93,16 +93,16 @@ type intsub = [
 ]
 
 type dtd = {
-  dtd_name : string;
+  dtd_name : name;
   dtd_external_id : external_id option;
   dtd_intsubset : intsub list;
 }
 
 type production =
-  | StartElement of string * (string * string) list
-  | EndElement of string
-  | EmptyElement of string * (string * string) list
-  | Pi of string * string
+  | StartElement of name * (name * string) list
+  | EndElement of name
+  | EmptyElement of name * (name * string) list
+  | Pi of name * string
   | Comment of string
   | Whitespace of string
   | Cdata of string
@@ -198,54 +198,21 @@ let fencoder state buf ucs4 =
  * ("'" [^"'"]* "'") | ('"' [^'"']* '"')
  *)
 let parse_string nextf state ucs4 =
-  if ucs4 = Xmlchar.u_quot || ucs4 = Xmlchar.u_apos then
-    let buf = Buffer.create 30 in
-    let rec get_text qt state ucs4 =
-      if ucs4 = qt then
-        let str = Buffer.contents buf in
-          Buffer.reset buf;
-          nextf str
-      else (
-        fencoder state buf ucs4;
-        next_char (get_text qt)
-      )
-    in
-      next_char (get_text ucs4)
-  else
-    raise (LexerError "expected string")
-
-
-(*
-let parse_ncname nextf state ucs4 =
   let buf = Buffer.create 30 in
-  let rec get_name state ucs4 =
-    if Xmlchar.is_ncnamechar ucs4 then (
-      fencoder state buf ucs4;
-      next_char get_name
-    ) else (
-      let name = Buffer.contents buf in
+  let rec get_text qt state ucs4 =
+    if ucs4 = qt then
+      let str = Buffer.contents buf in
         Buffer.reset buf;
-        nextf name state ucs4
+        nextf str
+    else (
+      fencoder state buf ucs4;
+      next_char (get_text qt)
     )
   in
-    if Xmlchar.is_first_ncnamechar ucs4 then (
-      fencoder state buf ucs4;
-      next_char get_name
-    )
+    if ucs4 = Xmlchar.u_quot || ucs4 = Xmlchar.u_apos then
+      next_char (get_text ucs4)
     else
-      raise (LexerError "invalid name")
-
-let parse_qname nextf state ucs4 =
-  parse_ncname (fun ncname1 state ucs4 ->
-                  if ucs4 = Xmlchar.u_colon then
-                    parse_ncname (fun ncname2 state ucs4 ->
-                                    nextf (ncname1, ncname2) state ucs4)
-                      state ucs4
-                  else
-                    nextf ("", ncname1) state ucs4
-               ) state ucs4
-
-*)
+      raise (LexerError "expected string")
 
 (*
  * [4] NameChar ::= Letter | Digit | '.' | '-' | '_' | ':' | CombiningChar |
@@ -364,10 +331,10 @@ let parse_entityref buf nextf state ucs4 =
             | "gt" -> fencoder state buf Xmlchar.u_gt
             | "apos" -> fencoder state buf Xmlchar.u_apos
             | "quot" -> fencoder state buf Xmlchar.u_quot
-     | "amp" -> fencoder state buf Xmlchar.u_amp
-     | other ->
-         let str = state.entity_resolver other in
-           Buffer.add_string buf str
+            | "amp" -> fencoder state buf Xmlchar.u_amp
+            | other ->
+                let str = state.entity_resolver other in
+                  Buffer.add_string buf str
          );
          nextf
        ) else
@@ -1273,7 +1240,7 @@ let parse_start_element nextf state ucs4 =
 let parse_end_element nextf state ucs4 =
   parse_name
     (fun name state ucs4 ->
-       skip_blank (expected_char Xmlchar.u_gt  (nextf name)) state (UCS4 ucs4)
+       skip_blank (expected_char Xmlchar.u_gt (nextf name)) state (UCS4 ucs4)
     ) state ucs4
 
 (*
@@ -1583,7 +1550,7 @@ let string_of_production = function
   | EmptyElement (name, _attrs) ->
       Printf.sprintf "EmptyElement %S" name
   | EndElement name ->
-      Printf.sprintf "EndElement %S" name;
+      Printf.sprintf "EndElement %S" name
   | Text text ->
       Printf.sprintf "Text %S" text
   | Cdata cdata ->
@@ -1591,9 +1558,9 @@ let string_of_production = function
   | Whitespace spaces ->
       Printf.sprintf "Whitespace %S" spaces
   | Pi (target, data) ->
-      Printf.sprintf "Pi %s %S" target data;
+      Printf.sprintf "Pi %s %S" target data
   | Comment comment ->
-      Printf.sprintf "Comment %S" comment;
+      Printf.sprintf "Comment %S" comment
   | Doctype _ ->
       Printf.sprintf "Doctype"
   | EndOfBuffer ->

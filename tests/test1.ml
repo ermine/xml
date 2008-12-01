@@ -8,7 +8,7 @@ open Sax
 let _ =
   let start_element_handler tag attrs =
     Printf.printf "<%s" tag;
-    List.iter (fun (k,v) -> Printf.printf " %s='%s'\ " k v) attrs;
+    List.iter (fun (k,v) -> Printf.printf " %s='%s'" k v) attrs;
     Printf.printf ">";
   in
   let end_element_handler tag =
