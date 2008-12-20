@@ -17,8 +17,9 @@ type prefix = string
 
 type ncname = string
 
-type qname = namespace * ncname
 type name = ncname
+
+type qname = namespace * prefix * name
 
 type cdata = string
 
@@ -56,7 +57,7 @@ struct
        bind_prefix t "xml" ns_xml;
        t
 
-   let string_of_qname t (ns, name) =
+   let string_of_qname t (ns, _prefix, name) =
      match ns with
        | `None -> name
        | `URI str -> 
@@ -87,15 +88,15 @@ struct
                "xmlns:" ^ prefix ^ "='" ^ encode  str ^ "'"
                  
                  
-   let local_namespaces t (ns, _name) attrs lnss =
+   let local_namespaces t (ns, _prefix, _name) attrs lnss =
      let lnss =
        if List.mem ns t.default_nss || List.mem ns lnss then
          lnss
        else
          ns :: lnss
      in
-       List.fold_left (fun acc ((ns, _name), _value) ->
-                         if ns = `None ||
+       List.fold_left (fun acc ((ns, _prefix, _name), _value) ->
+                         if ns = no_ns ||
                            ns = ns_xml ||
                            List.mem ns t.default_nss || 
                            List.mem ns lnss then
@@ -104,8 +105,8 @@ struct
                            ns :: acc) lnss attrs
          
    let rec aux_serialize lnss t out = function
-     | Xmlelement ((ns, _name) as qname, attrs, children) ->
-     out "<";
+     | Xmlelement ((ns, _prefix, _name) as qname, attrs, children) ->
+         out "<";
          out (string_of_qname t qname);
          if attrs <> [] then (
            out " ";
@@ -134,45 +135,54 @@ struct
      aux_serialize t.default_nss t out xml
        
 end
-  
+
 let get_qname = function
   | Xmlelement (qname, _, _) -> qname
   | _ -> raise NonXmlelement
       
-let get_namespace (namespace, _name) = namespace
+let get_namespace (namespace, _prefix, _name) = namespace
+
+let get_prefix (_ns, prefix, _name) = prefix
   
-let get_name (_namespace, name) = name
+let is_prefixed (_ns, prefix, _name) = prefix = ""
+  
+let get_name (_namespace, _prefix, name) = name
+
+let match_qname ?ns ?(can_be_prefixed=false) name (ns', prefix', name') =
+  (name' = name) &&
+    (match ns with None -> true | Some v -> ns' = v) &&
+    (match can_be_prefixed with true -> true | false -> prefix' = "")
   
 let get_attrs ?ns = function
   | Xmlelement (_', attrs, _) -> (
       match ns with
         | None -> attrs
-        | Some v -> List.find_all (fun ((ns', _), _) -> ns' = v) attrs
+        | Some v -> List.find_all (fun ((ns', _, _), _) -> ns' = v) attrs
     )
   | _ -> raise NonXmlelement
       
-let get_attr_value ?ns name attrs =
+let get_attr_value ?ns ?(can_be_prefixed=false) name attrs =
   let (_, value) =
-    List.find (fun ((ns', name'), _) ->
-                 match ns with
-                   | None -> name' = name
-                   | Some v -> (ns', name') = (v, name))
-      attrs
+    List.find (fun (qname, _) ->
+                 match_qname ?ns ~can_be_prefixed name qname
+              ) attrs
   in
     value
       
-let safe_get_attr_value ?ns name attrs =
-  try get_attr_value ?ns name attrs with Not_found -> ""
+let safe_get_attr_value ?ns ?(can_be_prefixed=false) name attrs =
+  try get_attr_value ?ns ~can_be_prefixed name attrs with Not_found -> ""
      
-let get_element qname childs =
+let get_element ?ns ?(can_be_prefixed=false) name childs =
   List.find (function
-     | Xmlelement (qname', _, _) -> qname' = qname
-     | _ -> false
+               | Xmlelement (qname, _, _) ->
+                   match_qname ?ns ~can_be_prefixed name qname
+               | _ -> false
             ) childs
     
-let get_elements qname childs =
+let get_elements ?ns ?(can_be_prefixed=false) name childs =
   List.filter (function
-                 | Xmlelement (qname', _, _) -> qname' = qname
+                 | Xmlelement (qname, _, _) ->
+                     match_qname ?ns ~can_be_prefixed name qname
                  | Xmlcdata cdata -> false
               ) childs
     
@@ -180,11 +190,11 @@ let get_children = function
   | Xmlelement (_, _, children) -> children
   | _ -> raise NonXmlelement
       
-let get_subelement qname el =
-  get_element qname (get_children el)
+let get_subelement ?ns ?(can_be_prefixed=false) name el =
+  get_element ?ns ~can_be_prefixed name (get_children el)
     
-let get_subelements qname el =
-  get_elements qname (get_children el)
+let get_subelements ?ns ?(can_be_prefixed=false) name el =
+  get_elements ?ns ~can_be_prefixed name (get_children el)
     
 let get_first_element els =
   List.find (function
@@ -208,21 +218,22 @@ let remove_cdata els =
 let make_element qname attrs children =
   Xmlelement (qname, attrs, children)
     
-let make_attr ?ns name value =
+let make_attr ?ns ?prefix  name value =
   let ns = match ns with None -> no_ns | Some v -> v in
-    (ns, name), value
+  let prefix = match prefix with None -> "" | Some v -> v in
+    (ns, prefix, name), value
     
 let make_simple_cdata qname cdata =
   Xmlelement (qname, [], [Xmlcdata cdata])
     
-let mem_qname qname els =
+let mem_qname ?ns ?(can_be_prefixed=false) name els =
   List.exists (function
-                 | Xmlelement (qname', _, _) -> qname' = qname
+                 | Xmlelement (qname, _, _) ->
+                     match_qname ?ns ~can_be_prefixed name qname
                  | _ -> false) els
     
-let mem_child qname el =
-  let childs = get_children el in
-    mem_qname qname childs
+let mem_child ?ns ?(can_be_prefixed=false) name el =
+  mem_qname ?ns ~can_be_prefixed name (get_children el)
       
 let iter f el = List.iter f (get_children el)
   
@@ -250,19 +261,19 @@ let remove_namespaces namespaces nss =
 let parse_qname nss (prefix, lname) =
   try
     let namespace = Hashtbl.find nss prefix in
-      (namespace, lname)
+      (namespace, prefix, lname)
   with Not_found ->
-    (`None, prefix ^ ":" ^ lname)
+    (no_ns, prefix, lname)
       
 let parse_qname_attribute nss (prefix, lname) = 
   if prefix = "" then
-    no_ns, lname
+    no_ns, prefix, lname
   else
     try
       let ns = Hashtbl.find nss prefix in
-        ns, lname
+        ns, prefix, lname
     with Not_found ->
-      (`None, prefix ^ ":" ^ lname)
+      (no_ns, prefix, lname)
         
 let parse_attrs nss attrs =
   List.map (fun (name, value) -> parse_qname_attribute nss name, value) attrs
@@ -274,7 +285,7 @@ let parse_element_head namespaces name attrs =
     let attrs =  parse_attrs namespaces attrs in
       qname, lnss, attrs
         
-let string_of_tag (ns, name) =
+let string_of_tag (ns, _prefix, name) =
   let prefix =
     match ns with
       | `None -> ""
@@ -294,8 +305,7 @@ let process_production (tag, state) =
       | Xmlparser.Whitespace _ ->
           process_prolog (Xmlparser.parse state)
       | Xmlparser.StartElement (name, attrs) ->
-          let qname, lnss, attrs = 
-            parse_element_head namespaces name attrs in
+          let qname, lnss, attrs = parse_element_head namespaces name attrs in
           let nextf childs (tag, state) =
             let el = Xmlelement (qname, attrs, childs) in
               remove_namespaces namespaces lnss;
@@ -303,8 +313,7 @@ let process_production (tag, state) =
           in
             get_childs qname nextf [] (Xmlparser.parse state)
       | Xmlparser.EmptyElement (name, attrs) ->
-          let qname, lnss, attrs = 
-            parse_element_head namespaces name attrs in
+          let qname, lnss, attrs = parse_element_head namespaces name attrs in
           let el = Xmlelement (qname, attrs, []) in
             remove_namespaces namespaces lnss;
             process_epilogue el (Xmlparser.parse state)
@@ -323,8 +332,7 @@ let process_production (tag, state) =
       | Xmlparser.Cdata str -> 
           get_childs qname nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
       | Xmlparser.StartElement (name, attrs) ->
-          let qname', lnss, attrs = 
-            parse_element_head namespaces name attrs in
+          let qname', lnss, attrs = parse_element_head namespaces name attrs in
           let newnextf childs' (tag, state) =
             let child = 
               Xmlelement (qname', attrs, childs') in
@@ -341,8 +349,7 @@ let process_production (tag, state) =
                           (string_of_tag qname)
                           (string_of_tag qname'))
       | Xmlparser.EmptyElement (name, attrs) ->
-          let qname', lnss, attrs = 
-            parse_element_head namespaces name attrs in
+          let qname', lnss, attrs = parse_element_head namespaces name attrs in
           let child = Xmlelement (qname', attrs, []) in
             remove_namespaces namespaces lnss;
             get_childs qname nextf (child :: childs) (Xmlparser.parse state)

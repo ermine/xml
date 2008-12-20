@@ -8,8 +8,8 @@ exception InvalidNS
 type namespace = [ `None | `URI of string ]
 type prefix = string
 type ncname = string
-type qname = namespace * ncname
 type name = ncname
+type qname = namespace * prefix * name
 type cdata = string
 type attribute = qname * cdata
 
@@ -44,23 +44,34 @@ module Serialization :
 
 val get_qname : element -> qname
 val get_namespace : qname -> namespace
+val get_prefix : qname -> prefix
+val is_prefixed : qname -> bool
 val get_name : qname -> string
+val match_qname : ?ns:namespace -> ?can_be_prefixed:bool -> name -> qname -> bool
 val get_attrs : ?ns:namespace -> element -> attribute list
-val get_attr_value : ?ns:namespace -> name -> attribute list -> string
-val safe_get_attr_value : ?ns:namespace -> name -> attribute list -> string
-val get_element : qname -> element list -> element
-val get_elements : qname -> element list -> element list
+val get_attr_value : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
+  attribute list -> cdata
+val safe_get_attr_value : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
+  attribute list -> string
+val get_element : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
+  element list -> element
+val get_elements : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
+  element list -> element list
 val get_children : element -> element list
-val get_subelement : qname -> element -> element
-val get_subelements : qname -> element -> element list
+val get_subelement : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
+  element -> element
+val get_subelements : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
+  element -> element list
 val get_first_element : element list -> element
 val get_cdata : element -> string
 val remove_cdata : element list -> element list
 val make_element : qname -> attribute list -> element list -> element
-val make_attr: ?ns:namespace -> string -> string -> attribute
+val make_attr: ?ns:namespace -> ?prefix:prefix -> name -> cdata -> attribute
 val make_simple_cdata : qname -> cdata -> element
-val mem_qname : qname -> element list -> bool
-val mem_child : qname -> element -> bool
+val mem_qname : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
+  element list -> bool
+val mem_child : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
+  element -> bool
 val iter : (element -> unit) -> element -> unit
 
 val split_attrs :

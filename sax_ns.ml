@@ -70,7 +70,7 @@ let create
                  remove_namespaces namespaces lnss;
                )
                else (
-                 let _, expected = qname' in
+                 let _, _, expected = qname' in
                    raise (Error (Printf.sprintf 
                                    "Bad end element: expected %s, was %s\n"
                                    expected name))
