@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 open Xml
@@ -8,10 +8,10 @@ exception Error of string
 
 type 'a data =
   | Continue of
-      (Xmlparser.production * Xmlparser.parser_t -> 'a data) *
-        Xmlparser.parser_t
-  | Result of 'a * Xmlparser.parser_t
-  
+      Xmlparser.parser_t *
+        (Xmlparser.parser_t * Xmlparser.production -> 'a data)
+  | Result of Xmlparser.parser_t * 'a
+      
 type ns_mapping = prefix * namespace
 
 type qname = ns_mapping * cdata
@@ -131,7 +131,6 @@ let reparent_nodes refel nodes =
 
 
 let create = Xmlparser.create
-let reset = Xmlparser.reset
 
 let make_parser ?(whitespace_preserve=false)
     ~unknown_encoding_handler ~entity_resolver =
@@ -170,7 +169,7 @@ let make_parser ?(whitespace_preserve=false)
     Text (null_noderef (), str)
   in
 
-  let rec process_epiloque nodes (tag, state) =
+  let rec process_epiloque nodes (state, tag) =
     match tag with
       | Xmlparser.Comment comment ->
           let node = new_comment comment in
@@ -185,14 +184,14 @@ let make_parser ?(whitespace_preserve=false)
           else
             process_epiloque nodes (Xmlparser.parse state)
       | Xmlparser.EndOfBuffer ->
-          Continue ((process_epiloque nodes), state)
+          Continue (state, (process_epiloque nodes))
       | Xmlparser.EndOfData ->
           reparent_nodes root (List.rev nodes);
-          Result (root, state)
+          Result (state, root)
       | _ ->
           failwith "Invalid epiloque"
 
-  and get_node qname nodes nextf (tag, state) =
+  and get_node qname nodes nextf (state, tag) =
     match tag with
       | Xmlparser.Comment comment ->
           let node = new_comment comment in
@@ -214,7 +213,7 @@ let make_parser ?(whitespace_preserve=false)
          add_namespaces namespaces lnss;
          let attrs =  parse_attrs namespaces attrs in
          let qname' = parse_qname namespaces (Xmlparser.split_name name) in
-         let newnextf childs (tag, state) =
+         let newnextf childs (state, tag) =
            let node = new_element qname'
              (parse_namespaces lnss)
              (parse_attributes attrs)
@@ -227,35 +226,20 @@ let make_parser ?(whitespace_preserve=false)
    | Xmlparser.EndElement name ->
        let qname' = parse_qname namespaces (Xmlparser.split_name name) in
          if qname = qname' then
-           nextf nodes (tag, state)
+           nextf nodes (state, tag)
          else
            let (_, expected) = qname in
              failwith (Printf.sprintf
                          "Bad end tag: expected %s, was %s"
                          expected name)
-   | Xmlparser.EmptyElement (name, attrs) ->
-       let lnss, attrs = split_attrs attrs in
-         add_namespaces namespaces lnss;
-         let attrs =  parse_attrs namespaces attrs in
-         let qname' = parse_qname namespaces (Xmlparser.split_name name) in
-         let node = new_element qname'
-           (parse_namespaces lnss)
-           (parse_attributes attrs)
-           []
-         in
-           remove_namespaces namespaces lnss;
-           get_node qname (node :: nodes) nextf (Xmlparser.parse state)
-   | Xmlparser.Cdata cdata ->
-       let node = new_text cdata in
-         get_node qname (node :: nodes) nextf (Xmlparser.parse state)
    | Xmlparser.Doctype _dtd ->
        failwith "Doctype declaration inside of element"
    | Xmlparser.EndOfBuffer ->
-       Continue ((get_node qname nodes nextf), state)
+       Continue (state, (get_node qname nodes nextf))
    | Xmlparser.EndOfData ->
        raise End_of_file
 
-  and process_prolog nodes (tag, state) =
+  and process_prolog nodes (state, tag) =
     match tag with
       | Xmlparser.Comment comment ->
           let node = new_comment comment in
@@ -271,7 +255,7 @@ let make_parser ?(whitespace_preserve=false)
             add_namespaces namespaces lnss;
             let attrs =  parse_attrs namespaces attrs in
             let qname = parse_qname namespaces (Xmlparser.split_name name) in
-            let newnextf childs (tag, state) =
+            let newnextf childs (state, tag) =
               let node = new_element qname
                 (parse_namespaces lnss)
                 (parse_attributes attrs)
@@ -281,18 +265,6 @@ let make_parser ?(whitespace_preserve=false)
                 process_epiloque (node :: nodes) (Xmlparser.parse state)
             in
               get_node qname [] newnextf (Xmlparser.parse state)
-      | Xmlparser.EmptyElement (name, attrs) ->
-          let lnss, attrs = split_attrs attrs in
-            add_namespaces namespaces lnss;
-            let attrs =  parse_attrs namespaces attrs in
-            let qname = parse_qname namespaces (Xmlparser.split_name name) in
-            let node = new_element qname
-              (parse_namespaces lnss)
-              (parse_attributes attrs)
-              []
-            in
-              remove_namespaces namespaces lnss;
-              process_epiloque (node :: nodes) (Xmlparser.parse state)
       | Xmlparser.Whitespace spaces ->
           if whitespace_preserve then
             let node = new_text spaces in
@@ -300,7 +272,7 @@ let make_parser ?(whitespace_preserve=false)
           else
             process_prolog nodes (Xmlparser.parse state)
       | Xmlparser.EndOfBuffer ->
-          Continue ((process_prolog nodes), state)
+          Continue (state, (process_prolog nodes))
       | Xmlparser.EndOfData ->
           raise End_of_file
       | _ ->

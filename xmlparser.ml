@@ -1,8 +1,7 @@
 (*
- * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
-open Fstream
 open Xmlencoding
 
 exception LexerError of string
@@ -11,12 +10,9 @@ exception UnknownEntity of string
 exception InvalidChar of int
 exception Finished
 
-type ucs4 = int
-
 type data =
-  | UCS4 of ucs4
+  | UCS4 of Xmlencoding.ucs4
   | EOB
-  | EOD
 
 type name = string
 
@@ -101,11 +97,9 @@ type dtd = {
 type production =
   | StartElement of name * (name * string) list
   | EndElement of name
-  | EmptyElement of name * (name * string) list
   | Pi of name * string
   | Comment of string
   | Whitespace of string
-  | Cdata of string
   | Text of string
   | Doctype of dtd
   | EndOfBuffer
@@ -113,49 +107,42 @@ type production =
 
 type parser_t = {
   is_parsing : bool;
-  finish: bool;
-  strm : char Stream.t;
-  fparser : parser_t -> char Stream.t -> (production * parser_t);
+  finish : bool;
+  i : int;
+  buffer : string;
   encoding : string;
-  mutable fencoder : int -> (int, char list) Fstream.t;
+  fdecoder : Xmlencoding.decoder;
+  fencoder : int -> char list;
+  fencoder_error : Xmlencoding.ucs4 list -> string;
+  fparser : parser_t -> parser_t * production;
   entity_resolver : string -> string;
-  encoding_handler : string -> (char -> (char, int) Fstream.t);
 }
 and lstream = | Lexer of (parser_t -> data -> lstream)
-              | Switch of
-                  (char -> (char, int) Fstream.t) *
-                    (parser_t -> data -> lstream)
-              | Token of production * (parser_t -> data -> lstream)
+              | SwitchDecoder of string * Xmlencoding.decoder
+              | Token of production * (parser_t -> data -> lstream) option * bool
 
-let rec ignore_eob f state data =
-  match data  with
-    | UCS4 ucs4 -> f state ucs4
-    | EOB -> Lexer (ignore_eob f)
-    | EOD -> Token (EndOfData, (ignore_eob f))
+let rec ignore_eob nextf state = function
+  | UCS4 ucs4 -> nextf state ucs4
+  | EOB -> Lexer (ignore_eob nextf)
 
-let rec skip_blank f state = function
-  | UCS4 ucs4 ->
-      if Xmlchar.is_space ucs4 then
-        Lexer (skip_blank f)
-      else
-        f state ucs4
-  | EOB ->
-      Token (EndOfBuffer, skip_blank f)
-  | EOD ->
-      Token (EndOfData, skip_blank f)
-        
-let after_blank nextf state = function
-  | UCS4 ucs4 ->
-      if Xmlchar.is_space ucs4 then
-        Lexer (skip_blank nextf)
-      else
-        raise (LexerError "expected space")
-  | EOB
-  | EOD ->
-      Lexer (skip_blank nextf)
+let rec skip_blank nextf =
+  ignore_eob (fun state ucs4 ->
+                if Xmlchar.is_space ucs4 then
+                  Lexer (skip_blank nextf)
+                else
+                  nextf state ucs4
+             )
 
-let next_char f =
-  Lexer (ignore_eob f)
+let after_blank nextf =
+  ignore_eob (fun state ucs4 ->
+                if Xmlchar.is_space ucs4 then
+                  Lexer (skip_blank nextf)
+                else
+                  raise (LexerError "expected space")
+             )
+
+let next_char nextf =
+  Lexer (ignore_eob nextf)
 
 let get_word nextf state ucs4 =
   let is_ascii ucs4 =
@@ -187,11 +174,12 @@ let expected_char ucs4 f state ucs4' =
                          (Char.chr ucs4) (Char.chr ucs4')))
 
 let fencoder state buf ucs4 =
-  match state.fencoder ucs4 with
-    | F f -> state.fencoder <- f
-    | R (r, f) ->
-        List.iter (fun c -> Buffer.add_char buf c) r;
-        state.fencoder <- f
+  List.iter (Buffer.add_char buf) (state.fencoder ucs4)
+
+let fencoder_string state uclist =
+  let buf = Buffer.create (List.length uclist) in
+    List.iter (fencoder state buf) uclist;
+    Buffer.contents buf
 
 (*
  * Gives a quoted string
@@ -316,6 +304,8 @@ let parse_charref nextf state ucs4 =
              raise (InvalidChar ucs4)
         ) state ucs4
 
+  
+
 (*
  * [68] EntityRef   ::= '&' Name ';'        [WFC: Entity Declared]
  *                                          [VC: Entity Declared]
@@ -432,14 +422,14 @@ let parse_attvalue nextf state ucs4 =
 (*
  * [14] CharData ::= [^<&]* - ([^<&]* ']]>' [^<&]* )
  *)
-let parse_text nextf lexer state ucs4 =
+let parse_text state ucs4 =
   let buf = Buffer.create 30 in
   let rec get_text state = function
     | UCS4 ucs4 ->
         if ucs4 = Xmlchar.u_lt then (
           let text = Buffer.contents buf in
             Buffer.reset buf;
-            nextf text ucs4
+            Token (Text text, None, false)
         ) else if ucs4 = Xmlchar.u_amp then
           next_char (parse_reference buf (Lexer get_text))
         else if ucs4 = Xmlchar.u_closebr then
@@ -464,32 +454,32 @@ let parse_text nextf lexer state ucs4 =
           Lexer get_text
         )
     | EOB ->
-        if Buffer.length buf = 0 then
-          Token (EndOfBuffer, lexer)
+        let text = Buffer.contents buf in
+          Buffer.reset buf;
+          Token (Text text, None, true)
+  in
+    fencoder state buf ucs4;
+    Lexer get_text
+
+let parse_whitespace state ucs4 =
+  let buf = Buffer.create 10 in
+  let rec get_spaces state = function
+    | UCS4 ucs4 ->
+        if Xmlchar.is_space ucs4 then (
+          fencoder state buf ucs4;
+          Lexer get_spaces
+        )
         else
           let text = Buffer.contents buf in
             Buffer.reset buf;
-            Token (Text text, lexer)
-    | EOD ->
-        Token (EndOfData, lexer)
+            Token (Whitespace text, None, false)
+    | EOB ->
+        let text = Buffer.contents buf in
+          Buffer.reset buf;
+          Token (Whitespace text, None, true)
   in
     fencoder state buf ucs4;
-    get_text
-
-let parse_whitespace nextf state ucs4 =
-  let buf = Buffer.create 10 in
-  let rec get_spaces state (ucs4:int) =
-    if Xmlchar.is_space ucs4 then (
-      fencoder state buf ucs4;
-      next_char get_spaces
-    )
-    else
-      let text = Buffer.contents buf in
-        Buffer.reset buf;
-        nextf text ucs4
-  in
-    fencoder state buf ucs4;
-    next_char get_spaces
+    Lexer get_spaces
 
 (*
  * [15] Comment ::= '<!--' ((Char - '-') | ('-' (Char - '-')))* '-->'
@@ -534,33 +524,25 @@ let parse_comment nextf state ucs4 =
 let parse_pi nextf =
   parse_name
     (fun target state ucs4 ->
-       let buf = Buffer.create 30 in
-       let rec get_pi_content state ucs41 =
+       let rec get_pi_content acc state ucs41 =
          if ucs41 = Xmlchar.u_quest then
            next_char (fun state ucs42 ->
                         if ucs42 = Xmlchar.u_gt then
-                          let pidata = Buffer.contents buf in
-                            Buffer.reset buf;
-                            nextf target pidata
-                        else (
-                          fencoder state buf ucs41;
-                          fencoder state buf ucs42;
-                          next_char  get_pi_content
-                        )
+                          nextf target (List.rev acc)
+                        else
+                          next_char  (get_pi_content (ucs42 :: ucs41 :: acc))
                      )
-         else (
-           fencoder state buf ucs41;
-           next_char get_pi_content
-         )
+         else
+           next_char (get_pi_content (ucs41 :: acc))
        in
          if Xmlchar.is_space ucs4 then
            next_char
-             (fun state ucs4 -> skip_blank get_pi_content state (UCS4 ucs4))
+             (fun state ucs4 -> skip_blank (get_pi_content []) state (UCS4 ucs4))
          else if ucs4 = Xmlchar.u_quest then
            next_char
              (fun state ucs4 ->
                 if ucs4 = Xmlchar.u_gt then
-                  nextf target ""
+                  nextf target []
                 else
                   raise (LexerError "Invalid syntax of PI")
              )
@@ -1094,7 +1076,9 @@ let parse_intsubset mark_end nextf state ucs4 =
                  else if ucs4 = Xmlchar.u_quest then
                    next_char
                      (parse_pi
-                        (fun target data -> (go_list acc (`PI (target, data)))))
+                        (fun target data ->
+                           (go_list acc
+                              (`PI (target, fencoder_string state data)))))
                  else
                    raise (LexerError "expected '!' or '?'")
               )
@@ -1138,10 +1122,7 @@ let parse_intsubset mark_end nextf state ucs4 =
             else
               get_list acc state data
         | EOB ->
-            Token (EndOfBuffer, aux_go_list acc)
-        | EOD ->
-            Token (EndOfData, aux_go_list acc)
-
+            Lexer (aux_go_list acc)
     in
       Lexer (aux_go_list (elt :: acc))
   in
@@ -1283,15 +1264,13 @@ let parse_cdata nextf =
           fencoder state buf ch1;
           Lexer get_cdata
         )
-    | EOB
-    | EOD as t ->
+    | EOB ->
         if Buffer.length buf = 0 then
-          Token ((if t = EOB then EndOfBuffer else EndOfData), get_cdata)
+          Lexer get_cdata
         else
           let cdata = Buffer.contents buf in
             Buffer.reset buf;
-            Token (Cdata cdata, get_cdata)
-
+            Token (Text cdata, Some get_cdata, true)
   in
     next_char (get_word
                  (fun word state ucs4 ->
@@ -1312,14 +1291,16 @@ let parse_cdata nextf =
  * [26] VersionNum  ::= '1.0'
  *)
 let parse_xmldecl state data =
-  let ua = uarray_of_utf8_string data in
+  let ua = Array.of_list data in
   let s i =
     if i < Array.length ua then ua.(i)
-    else raise (LexerError ("bad xml declaration: " ^ data))
+    else raise (LexerError ("bad xml declaration: " ^
+                              (state.fencoder_error data)))
   in
   let buf = Buffer.create 30 in
   let ascii_letter ucs4 =
-    ucs4 >= Xmlchar.of_char 'a' && ucs4 <= Xmlchar.of_char 'z' in
+    ucs4 >= Xmlchar.of_char 'a' && ucs4 <= Xmlchar.of_char 'z'
+  in
   let rec get_name i =
     let ucs4 = s i in
       if ascii_letter ucs4 then (
@@ -1363,198 +1344,129 @@ let parse_xmldecl state data =
                 else
                   ((name, value) :: acc)
             else
-              raise (LexerError ("bad xml declaration: " ^ data))
+              raise (LexerError ("bad xml declaration: " ^
+                                   (state.fencoder_error data)))
         else
-          raise (LexerError ("bad xml declaration: " ^ data))
+          raise (LexerError ("bad xml declaration: " ^
+                               (state.fencoder_error data)))
     else
       acc
   in
   let attrs = get_attrs [] 0 in
     List.rev attrs
 
-let rec lexer state (data:data) =
-  let opened_lt state ucs4 =
-    if ucs4 = Xmlchar.u_slash then
-      next_char
-        (parse_end_element (fun name -> Token (EndElement name, lexer)))
-    else if ucs4 = Xmlchar.u_quest then
-      next_char
-        (parse_pi (fun target data -> Token (Pi (target, data), lexer)))
-    else if ucs4 = Xmlchar.u_excl then
-      next_char
-        (fun state ucs4 ->
-           if ucs4 = Xmlchar.u_openbr then
-             parse_cdata (fun cdata -> Token (Cdata cdata, lexer))
-           else if ucs4 = Xmlchar.u_dash then
-             next_char
-               (parse_comment
-                  (fun comment -> Token (Comment comment, lexer)))
-    else
-      get_word
-        (fun word state ucs4 ->
-           match word with
-             | "DOCTYPE" ->
-                 parse_doctype
-                   (fun dtd ->
-                      Token ((Doctype dtd), lexer))
-                   state ucs4
-             | _ ->
-                 raise (UnknownToken word)
-        ) state ucs4
-        )
-    else
-      parse_start_element
-        (fun name attrs flag ->
-           if not flag then
-             Token (EmptyElement (name, (List.rev attrs)), lexer)
-           else
-             Token (StartElement (name, (List.rev attrs)), lexer)
-        )
-        state ucs4
-  in
-    match data with
-      | UCS4 ucs4 ->
-          if ucs4 = Xmlchar.u_lt then
-            next_char opened_lt
-          else if Xmlchar.is_space ucs4 then
-            parse_whitespace
-              (fun text ucs4 ->
-                 if ucs4 = Xmlchar.u_lt then
-                   Token (Whitespace text, (ignore_eob opened_lt))
-                 else
-                   let l = parse_text
-                     (fun text ucs4 ->
-                        if ucs4 = Xmlchar.u_lt then
-                          Token (Text text,
-                                 (ignore_eob opened_lt))
-                        else
-                          raise (LexerError "expected '<'"))
-                     lexer state ucs4
-                   in
-                     Token (Whitespace text, l)
-              )
-              state ucs4
-          else
-            Lexer (parse_text
-                     (fun text ucs4 ->
-                        if ucs4 = Xmlchar.u_lt then
-                          Token (Text text, (ignore_eob opened_lt))
-                        else
-                          raise (LexerError "expected '<'"))
-                     lexer state ucs4)
-      | EOB ->
-          Token (EndOfBuffer, lexer)
-      | EOD ->
-          Token (EndOfBuffer, lexer)
+let opened_lt state ucs4 =
+  if ucs4 = Xmlchar.u_slash then
+    next_char
+      (parse_end_element (fun name -> Token (EndElement name, None, true)))
+  else if ucs4 = Xmlchar.u_quest then
+    next_char
+      (parse_pi (fun target data -> Token
+                   (Pi (target, fencoder_string state data), None, true)))
+  else if ucs4 = Xmlchar.u_excl then
+    next_char
+      (fun state ucs4 ->
+         if ucs4 = Xmlchar.u_openbr then
+           parse_cdata (fun cdata -> Token (Text cdata, None, true))
+         else if ucs4 = Xmlchar.u_dash then
+           next_char
+             (parse_comment (fun comment -> Token (Comment comment, None, true)))
+         else
+           get_word
+             (fun word state ucs4 ->
+                match word with
+                  | "DOCTYPE" ->
+                      parse_doctype
+                        (fun dtd -> Token ((Doctype dtd), None, true)) state ucs4
+                  | _ ->
+                      raise (UnknownToken word)
+             ) state ucs4
+      )
+  else
+    parse_start_element
+      (fun name attrs flag ->
+         if not flag then
+           Token (StartElement (name, List.rev attrs),
+                  Some (fun state data ->
+                          Token ((EndElement name), None, false)),
+                  true)
+         else
+           Token (StartElement (name, (List.rev attrs)), None, true)
+      ) state ucs4
 
-let process_xmldecl attrs state =
+let lexer state ucs4 =
+  if ucs4 = Xmlchar.u_lt then
+    next_char opened_lt
+  else if Xmlchar.is_space ucs4 then
+    parse_whitespace state ucs4
+  else
+    parse_text state ucs4
+        
+let process_xmldecl encoding_handler attrs state =
   let version =
     try List.assoc "version" attrs with Not_found -> "" in
     if version <> "1.0" then
       raise (LexerError ("unknown version of xml: '" ^ version ^ "'"));
     let encoding = try List.assoc "encoding" attrs with Not_found -> "" in
       if encoding = "" then
-        Lexer lexer
+        next_char lexer
       else
         let up = String.uppercase encoding in
           if state.encoding = up then
-            Lexer lexer
+            next_char lexer
           else
             let fdecoder =
               match up with
                 | "ASCII" | "US-ASCII" ->
-                    Xmlencoding.decode_ascii
+                    Xmlencoding.make_decoder_ascii
                 | "LATIN1" | "ISO-8859-1" ->
-                    Xmlencoding.decode_latin1
+                    Xmlencoding.make_decoder_latin1
                 | "UTF-8" ->
-                    Xmlencoding.decode_utf8
+                    Xmlencoding.make_decoder_utf8
                 | "UTF-16" | "UTF-16BE" ->
-                    Xmlencoding.decode_utf16 BE
+                    Xmlencoding.make_decoder_utf16 BE
                 | "UTF-16LE" ->
-                    Xmlencoding.decode_utf16 BE
+                    Xmlencoding.make_decoder_utf16 BE
                 | "UCS-4" | "UCS-4BE" ->
-                    Xmlencoding.decode_ucs4
+                    Xmlencoding.make_decoder_ucs4
                 | "UCS-4LE" ->
-                    Xmlencoding.decode_ucs4le
+                    Xmlencoding.make_decoder_ucs4le
                 | other ->
-                    state.encoding_handler encoding
+                    encoding_handler encoding
             in
-              Switch (fdecoder, lexer)
+              SwitchDecoder (encoding, fdecoder)
 
 (*
  * [22] prolog      ::= XMLDecl? Misc* (doctypedecl Misc* )?
  * [27] Misc        ::= Comment | PI | S
  *)
-let rec start_lexer state (data:data) =
-  let opened_lt state ucs4 =
-    if ucs4 = Xmlchar.u_slash then
-      next_char
-        (parse_end_element (fun name -> Token (EndElement name, lexer)))
-    else if ucs4 = Xmlchar.u_quest then
-      next_char (parse_pi (fun pi data ->
-                             if pi = "xml" then
-                               let attrs = parse_xmldecl state data in
-                                 process_xmldecl attrs state
-                             else
-                               Token (Pi (pi, data), lexer)))
-    else if ucs4 = Xmlchar.u_excl then
-      next_char
-        (fun state ucs4 ->
-           if ucs4 = Xmlchar.u_openbr then
-             parse_cdata (fun cdata -> Token (Cdata cdata, lexer))
-           else if ucs4 = Xmlchar.u_dash then
-             next_char
-               (parse_comment
-                  (fun comment -> Token (Comment comment, lexer)))
-           else
-             get_word
-               (fun word state ucs4 ->
-                  match word with
-                    | "DOCTYPE" ->
-                        parse_doctype
-                          (fun dtd ->
-                             Token ((Doctype dtd), lexer))
-                          state ucs4
-                    | _ ->
-                        raise (UnknownToken word)
-               ) state ucs4)
-    else
-      parse_start_element
-        (fun name attrs flag ->
-           if not flag then
-             Token (EmptyElement (name, (List.rev attrs)), lexer)
-           else
-             Token (StartElement (name, (List.rev attrs)), lexer)
-        )
-        state ucs4
-  in
-    match data with
-      | UCS4 ucs4 ->
-          if ucs4 = Xmlchar.u_lt then
-            next_char opened_lt
-          else if Xmlchar.is_space ucs4 then
-            parse_whitespace
-              (fun text ucs4 ->
-                 Token (Whitespace text, (ignore_eob opened_lt)))
-              state ucs4
-          else
-            raise (LexerError "Start tag expected, '<' not found")
-      | EOB ->
-          Token (EndOfBuffer, lexer)
-      | EOD ->
-          Token (EndOfData, lexer)
+let start_lexer encoding_handler state ucs4 =
+  if ucs4 = Xmlchar.u_lt then
+    next_char
+      (fun state ucs4 ->
+         if ucs4 = Xmlchar.u_quest then
+           next_char (parse_pi
+                        (fun pi data ->
+                           if pi = "xml" then
+                             let attrs = parse_xmldecl state data in
+                               process_xmldecl encoding_handler attrs state
+                           else
+                             Token (Pi (pi,
+                                        fencoder_string state data),
+                                    None, true)))
+         else
+           opened_lt state ucs4
+      )
+  else
+    lexer state ucs4
 
 let string_of_production = function
   | StartElement (name, _attrs) ->
       Printf.sprintf "StartElement %S" name
-  | EmptyElement (name, _attrs) ->
-      Printf.sprintf "EmptyElement %S" name
   | EndElement name ->
       Printf.sprintf "EndElement %S" name
   | Text text ->
       Printf.sprintf "Text %S" text
-  | Cdata cdata ->
-      Printf.sprintf "Cdata %S" cdata
   | Whitespace spaces ->
       Printf.sprintf "Whitespace %S" spaces
   | Pi (target, data) ->
@@ -1572,99 +1484,117 @@ let string_of_production = function
  * \r\n -> \n
  * \r -> \n
  *)
-let rec norm_nl ucs4 =
+let norm_nl state ucs4 =
   if ucs4 = Xmlchar.u_cr then
-    let rec aux_newline ch =
-      if ch = Xmlchar.u_lf then
-        R (Xmlchar.u_lf, norm_nl)
-      else if ch = Xmlchar.u_cr then
-        R (Xmlchar.u_lf, aux_newline)
-      else
-        R (Xmlchar.u_lf, norm_nl)
-    in
-      F aux_newline
+    None
+  else if ucs4 = Xmlchar.u_lf then
+    if state then
+      Some ucs4
+    else
+      Some Xmlchar.u_lf
   else
-    R (ucs4, norm_nl)
+    if state then
+      Some Xmlchar.u_lf
+    else
+      Some ucs4
 
-let rec fparser fdecoder norm_nl flexer state strm =
-  match Stream.peek strm with
-    | Some ch ->
-        Stream.junk strm;
-        (match fdecoder ch with
-           | F fdecoder ->
-               fparser fdecoder norm_nl flexer state strm
-           | R (ucs4, fdecoder) ->
-               match norm_nl ucs4 with
-                 | F norm_nl ->
-                     fparser fdecoder norm_nl flexer state strm
-                 | R (ucs4, norm_nl) ->
-                     match flexer state (UCS4 ucs4) with
-                       | Lexer flexer ->
-                           fparser fdecoder norm_nl flexer state strm
-                       | Switch (fdecoder, flexer) ->
-                           fparser fdecoder norm_nl flexer state strm
-                       | Token (tag, flexer) ->
-                           let newstate = {state with
-                                             strm = strm;
-                                             fparser = fparser fdecoder norm_nl flexer;
-                                          } in
-                             (tag, newstate)
-        )
-    | None -> (
-        if state.finish then (
-          match       flexer state EOD with
-            | _ ->
-                let newstate = {state with is_parsing = false } in
-                  EndOfData, newstate
-        ) else (
-          match flexer state EOB with
-            | Lexer flexer ->
-                let newstate = {state with
-                                  strm = [< >];
-                                  fparser = fparser fdecoder norm_nl flexer } in
-                  (EndOfBuffer, newstate)
-            | Switch (fdecoder, flexer) ->
-                let newstate = {state with
-                                  strm = [< >];
-                                  fparser = fparser fdecoder norm_nl flexer; } in
-                  (EndOfBuffer, newstate)
-            | Token (tag, flexer) ->
-                let newstate = {state with
-                                  strm = [< >];
-                                  fparser = fparser fdecoder norm_nl flexer; } in
-                  (tag, newstate)
-        )
-      )
-
-let prepare_fparser enc unknown_encoding_handler lexer state strm =
-  match enc with
-    | "NONE" -> (
-        let sl = Stream.npeek 4 strm in
-          if List.length sl = 4 then
-            let al = Array.of_list sl in
-            let encoding, fdecoder = Xmlencoding.autodetect_encoding
-              (Xmlchar.of_char al.(0)) (Xmlchar.of_char al.(1))
-              (Xmlchar.of_char al.(2)) (Xmlchar.of_char al.(3))
-            in
-              fparser fdecoder norm_nl lexer
-                {state with encoding = encoding} strm
+let rec fparser norm_nl_state flexer state =
+  let rec peek_chars acc i = function
+    | 0 -> List.rev acc
+    | j -> peek_chars (state.buffer.[i] :: acc) (i+1) (j-1)
+  in
+  let rec get_char norm_nl_state j =
+    if j < String.length state.buffer then
+      let n = state.fdecoder.need_bytes state.buffer.[j] in
+        if j+n <= String.length state.buffer then
+          let sl = peek_chars [] j n in
+            match state.fdecoder.decode sl with
+              | None ->
+                  get_char norm_nl_state (j+n)
+              | Some ucs4 ->
+                  match norm_nl norm_nl_state ucs4 with
+                    | None ->
+                        get_char true (j+n)
+                    | Some ucs4 ->
+                        (false, (j+n), UCS4 ucs4)
+        else
+          if state.finish then
+            failwith "Unexpected end of input"
           else
-            raise TooFew
-      )
-    | "UTF-8" ->
-        fparser Xmlencoding.decode_utf8 norm_nl lexer state strm
-    | "UTF-16" ->
-        fparser (Xmlencoding.decode_utf16 Xmlencoding.BE) norm_nl lexer
-          state strm
-    | "ASCII" ->
-        fparser Xmlencoding.decode_ascii norm_nl lexer state strm
-    | "LATIN1" ->
-        fparser Xmlencoding.decode_latin1 norm_nl lexer state strm
-    | "UCS-4" ->
-        fparser Xmlencoding.decode_ucs4 norm_nl lexer state strm
-    | other ->
-        failwith ("Unsupported encoding " ^ other)
-
+            (norm_nl_state, j, EOB)
+    else
+      (norm_nl_state, j, EOB)
+  in
+  let rec aux_fparser norm_nl_state flexer i state =
+    let (norm_nl_state, j, ch) = get_char norm_nl_state i in
+      match ch with
+        | UCS4 ucs4 ->
+            let r =
+              match flexer with
+                | None -> lexer state ucs4
+                | Some v -> v state (UCS4 ucs4)
+            in (
+              match r with
+                | Lexer flexer ->
+                    aux_fparser norm_nl_state (Some flexer) j state
+                | SwitchDecoder (encoding, fdecoder) ->
+                    aux_fparser norm_nl_state None j
+                      {state with encoding = encoding; fdecoder = fdecoder}
+                | Token (tag, flexer, emit) ->
+                    let newstate =
+                      {state with
+                         i = if emit then j else i;
+                         fparser = fparser norm_nl_state flexer} in
+                      (newstate, tag)
+              )
+        | EOB ->
+            if state.finish then
+              match flexer with
+                | None ->
+                    let newstate = {state with is_parsing = false; i=j} in
+                      (newstate, EndOfData)
+                | Some v ->
+                    match v state EOB with
+                      | Lexer _ ->
+                          failwith "Unexpected end of data"
+                      | Token (tag, flexer, _) ->
+                          let newstate =
+                            {state with i = j;
+                               fparser = fparser norm_nl_state flexer } in
+                            (newstate, tag)
+                      | SwitchDecoder _ ->
+                          let newstate =
+                            {state with is_parsing = false; i = j } in
+                            (newstate, EndOfData)
+            else
+              match flexer with
+                | None ->
+                    let newstate =
+                      {state with i = j;
+                         fparser = fparser norm_nl_state flexer} in
+                      (newstate, EndOfBuffer)
+                | Some v ->
+                    match v state EOB with
+                      | Lexer flexer ->
+                          let newstate =
+                            {state with i = j;
+                               fparser = fparser norm_nl_state (Some flexer)} in
+                            (newstate, EndOfBuffer)
+                      | SwitchDecoder (encoding, fdecoder) ->
+                          let newstate =
+                            {state with i = j;
+                               encoding = encoding;
+                               fdecoder = fdecoder;
+                               fparser = fparser norm_nl_state None} in
+                            (newstate, EndOfBuffer)
+                      | Token (tag, flexer, _emit) ->
+                          let newstate =
+                            {state with i = j;
+                               fparser = fparser norm_nl_state flexer} in
+                            (newstate, tag)
+  in
+    aux_fparser norm_nl_state flexer state.i state
+                
 let create ?encoding ?unknown_encoding_handler ?entity_resolver () =
   let entity_resolver =
     match entity_resolver with
@@ -1673,32 +1603,91 @@ let create ?encoding ?unknown_encoding_handler ?entity_resolver () =
   in
   let encoding_handler =
     match unknown_encoding_handler with
-      | None -> (fun name -> raise (LexerError ("Unknown encoding " ^ name)))
-      | Some v -> v
+      | None -> (fun _ -> raise (LexerError "Unknown encoding"))
+      | Some f -> f
   in
-  let enc =
+  let fencoder_error uclist =
+    let buf = Buffer.create (List.length uclist) in
+      List.iter
+        (fun ucs4 -> List.iter (Buffer.add_char buf)
+           (Xmlencoding.encode_utf8 ucs4)) uclist;
+      Buffer.contents buf
+  in
     match encoding with
-      | None -> "NONE"
+      | None ->
+          let fparser =
+            fun state ->
+              if String.length state.buffer < 4 then
+                (state, EndOfBuffer)
+              else
+                let encoding, fdecoder =
+                  Xmlencoding.autodetect_encoding
+                    state.buffer.[0] state.buffer.[1]
+                    state.buffer.[2] state.buffer.[3] in
+                  fparser false
+                    (Some (ignore_eob (start_lexer encoding_handler)))
+                    {state with encoding = encoding; fdecoder = fdecoder}
+          in
+            {
+              is_parsing = true;
+              finish = false;
+              i = 0;
+              buffer = "";
+              entity_resolver = entity_resolver;
+              encoding = "";
+              fencoder = Xmlencoding.encode_utf8;
+              fencoder_error = fencoder_error;
+              fdecoder = Xmlencoding.make_decoder_utf8;
+              fparser = fparser;
+            }
       | Some e ->
-          match e with
-            | Enc_UTF8 -> "UTF-8"
-            | Enc_UTF16 -> "UTF-16"
-            | Enc_ASCII -> "ASCII"
-            | Enc_Latin1 -> "LATIN1"
-            | Enc_UCS4 -> "UCS-4"
-  in
-  let fparser = prepare_fparser enc encoding_handler start_lexer in
-    {
-      is_parsing = true;
-      finish = false;
-      encoding = enc;
-      fencoder = Xmlencoding.encode_utf8;
-      fparser = fparser;
-      strm = [< >];
-      entity_resolver = entity_resolver;
-      encoding_handler = encoding_handler
-    }
+          let fdecoder =
+            match e with
+              | "ASCII" ->
+                  make_decoder_ascii
+              | "LATIN1" ->
+                  make_decoder_latin1
+              | "UTF-8" ->
+                  make_decoder_utf8
+              | "UTF-16" ->
+                  make_decoder_utf16 BE
+              | "UCS-4" ->
+                  make_decoder_ucs4
+              | _ ->
+                  match unknown_encoding_handler with
+                    | None ->
+                        failwith "Unknown encoding"
+                    | Some f ->
+                        f e
+          in
+            {
+              is_parsing = true;
+              finish = false;
+              i = 0;
+              buffer = "";
+              entity_resolver = entity_resolver;
+              encoding = e;
+              fencoder = Xmlencoding.encode_utf8;
+              fencoder_error = fencoder_error;
+              fdecoder = fdecoder;
+              fparser = fparser false
+                (Some (ignore_eob (start_lexer encoding_handler)))
+            }
 
+let add_buffer state buffer =
+  let newbuffer =
+    if state.i < String.length state.buffer then
+      (if state.i > 0 then
+         String.sub state.buffer state.i (String.length state.buffer - state.i)
+       else
+         state.buffer
+      ) ^ buffer
+    else
+      buffer
+  in
+    {state with i = 0; buffer = newbuffer}
+    
+  
 let parse ?buf ?finish state =
   let finish =
     match finish with
@@ -1710,63 +1699,62 @@ let parse ?buf ?finish state =
       match buf with
         | None -> {state with finish = finish}
         | Some v ->
-            let newstrm =
-              if state.strm = [< >] then Stream.of_string v
-              else [< state.strm; Stream.of_string v >] in
-              {state with strm = newstrm; finish = finish}
+            let newbuffer =
+              if state.i < String.length state.buffer then
+                (if state.i > 0 then
+                   String.sub state.buffer state.i
+                     (String.length state.buffer - state.i)
+                 else
+                   state.buffer
+                ) ^ v
+              else
+                v
+            in
+              {state with i = 0; buffer = newbuffer; finish = finish}
     in
-      state.fparser newstate newstate.strm
+      state.fparser newstate
   else
     raise Finished
 
+let set_finish state =
+  {state with finish = true}
+
+(*
 let parse_dtd str =
   let entity_resolver =
     (fun name -> raise (LexerError ("Unknown entity name " ^ name))) in
   let encoding_handler =
     (fun name -> raise (LexerError ("Unknown encoding " ^ name))) in
   let enc = "UTF-8" in
-  let lexer =
+  let dtd_lexer =
     skip_blank (parse_intsubset EOD
                   (fun intsubset -> Token (Doctype { dtd_name = "";
                                                      dtd_external_id = None;
                                                      dtd_intsubset = intsubset
                                                    }, lexer))) in
-  let fparser = prepare_fparser enc encoding_handler lexer in
-  let strm = Stream.of_string str in
   let state =
     {
       is_parsing = true;
       finish = true;
       encoding = enc;
+      fdecoder = make_fdecoder enc encoding_handler str;
       fencoder = Xmlencoding.encode_utf8;
-      fparser = fparser;
-      strm = strm;
+      flexer = None;
+      i = 0;
+      buffer = str;
       entity_resolver = entity_resolver;
       encoding_handler = encoding_handler
     }
   in
-    state.fparser state state.strm
+    fparser false dtd_lexer 0 state
+*)
       
 let set_entity_resolver state entity_resolver =
   {state with  entity_resolver = entity_resolver }
 
-let reset state =
-  let fparser = prepare_fparser state.encoding state.encoding_handler
-    start_lexer in
-    {state with
-       is_parsing = true;
-       strm = [< >];
-       fparser = fparser}
-
 let get_rest_buffer state =
-  let buf = Buffer.create 9216 in
-  let rec aux_iter () =
-    match Stream.peek state.strm with
-      | Some ch -> Buffer.add_char buf ch; aux_iter ()
-      | None -> Buffer.contents buf
-  in
-    aux_iter ()
-
+  String.sub state.buffer state.i (String.length state.buffer - state.i)
+  
 let decode = Xml_decode.decode
 let encode = Xml_encode.encode
 

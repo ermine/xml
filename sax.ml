@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 open Xml
@@ -17,17 +17,14 @@ let create
     ?(whitespace_preserve=false) () =
 
   let stack = Stack.create () in
-    
-  let rec process_production (tag, state) =
+
+  let rec process_production (state, tag) =
     match tag with
       | Pi (target, data) ->
           pi_handler target data;
           process_production (parse state)
       | Comment comment ->
           comment_handler comment;
-          process_production (parse state)
-      | Cdata cdata ->
-          character_data_handler cdata;
           process_production (parse state)
       | Text text ->
           character_data_handler text;
@@ -50,18 +47,14 @@ let create
               process_epilogue (parse state)
             else
               process_production (parse state)
-      | EmptyElement (name, attrs) ->
-          start_element_handler name attrs;
-          end_element_handler name;
-          process_production (parse state)
       | Doctype _dtd ->
           failwith "Unexpected doctype"
       | EndOfBuffer ->
-          process_production, state
+          (state, process_production)
       | EndOfData ->
           raise End_of_file
 
-  and process_epilogue (tag, state) =
+  and process_epilogue (state, tag) =
     match tag with
       | Comment comment ->
           comment_handler comment;
@@ -74,13 +67,13 @@ let create
             character_data_handler space;
           process_epilogue (parse state)
       | EndOfBuffer ->
-          process_epilogue, state
+          (state, process_epilogue)
       | EndOfData ->
           raise End_of_file
       | _ ->
           failwith "Unexpected tag in epilogue"
-          
-  and process_prolog (tag, state) =
+    
+  and process_prolog (state, tag) =
    match tag with
       | Comment comment ->
           comment_handler comment;
@@ -88,32 +81,24 @@ let create
       | Doctype _dtd ->
           process_prolog (parse state)
       | StartElement (name, attrs) ->
-          process_production (tag, state)
+          process_production (state, tag)
       | Whitespace space ->
           process_prolog (parse state)
-      | EmptyElement (name, attrs) ->
-          start_element_handler name attrs;
-          end_element_handler name;
-          process_epilogue (parse state)
       | Pi (target, data) ->
           pi_handler target data;
           process_prolog (parse state)
-      | EndElement tag ->
-          failwith ("Unexpected </" ^ tag ^ ">")
-      | Cdata _ ->
-          failwith "Unexpected cdata"
+      | EndElement name ->
+          failwith ("Unexpected </" ^ name ^ ">")
       | Text _ ->
           failwith "Unexpected text"
       | EndOfBuffer ->
-          process_prolog, state
+          (state, process_prolog)
       | EndOfData ->
           raise End_of_file
   in
   let state = Xmlparser.create
     ?encoding ?unknown_encoding_handler ?entity_resolver () in
-    (process_prolog, state) 
+    (state, process_prolog) 
       
-let parse ?buf ?finish (callback, state) =
+let parse ?buf ?finish (state, callback) =
   callback (Xmlparser.parse ?buf ?finish state)
-
-let reset (_, state) = Xmlparser.reset state

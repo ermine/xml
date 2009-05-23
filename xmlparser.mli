@@ -1,14 +1,13 @@
 (*
- * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009, Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 exception LexerError of string
 exception UnknownEntity of string
 
 type data =
-   | UCS4 of int
+   | UCS4 of Xmlencoding.ucs4
    | EOB
-   | EOD
 
 type name = string
 
@@ -93,11 +92,9 @@ type dtd = {
 type production =
     StartElement of name * (name * string) list
   | EndElement of name
-  | EmptyElement of name * (name * string) list
   | Pi of name * string
   | Comment of string
   | Whitespace of string
-  | Cdata of string
   | Text of string
   | Doctype of dtd
   | EndOfBuffer
@@ -105,33 +102,38 @@ type production =
 
 type parser_t = {
   is_parsing : bool;
-  finish: bool;
-  strm : char Stream.t;
-  fparser : parser_t -> char Stream.t -> (production * parser_t);
+  finish : bool;
+  i : int;
+  buffer : string;
   encoding : string;
-  mutable fencoder : int -> (int, char list) Fstream.t;
+  fdecoder : Xmlencoding.decoder;
+  fencoder : int -> char list;
+  fencoder_error : Xmlencoding.ucs4 list -> string;
+  fparser : parser_t -> parser_t * production;
   entity_resolver : string -> string;
-  encoding_handler : string -> (char -> (char, int) Fstream.t);
 }
-and lstream =
-    Lexer of (parser_t -> data -> lstream)
-  | Switch of (char -> (char, int) Fstream.t) * (parser_t -> data -> lstream)
-  | Token of production * (parser_t -> data -> lstream)
+and lstream = | Lexer of (parser_t -> data -> lstream)
+              | SwitchDecoder of string * Xmlencoding.decoder
+              | Token of production * (parser_t -> data -> lstream) option * bool
 
 val string_of_production : production -> string
 
 val create :
-  ?encoding:Xmlencoding.encoding ->
-  ?unknown_encoding_handler:(string -> char -> (char, int) Fstream.t) ->
+  ?encoding:string ->
+  ?unknown_encoding_handler:(string -> Xmlencoding.decoder) ->
   ?entity_resolver:(string -> string) -> unit -> parser_t
 
-val parse : ?buf:string -> ?finish:bool -> parser_t -> (production * parser_t)
+val add_buffer : parser_t -> string -> parser_t
+  
+val parse : ?buf:string -> ?finish:bool -> parser_t -> (parser_t * production)
 
-val parse_dtd : string -> production * parser_t
+val set_finish : parser_t -> parser_t
 
+(*
+val parse_dtd : string -> parser_t * production
+*)
+  
 val set_entity_resolver : parser_t -> (string -> string) -> parser_t
-
-val reset : parser_t -> parser_t
 
 val get_rest_buffer : parser_t -> string
 

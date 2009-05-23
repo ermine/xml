@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  * 
  * http://www.w3.org/TR/xml (fourth edition)
  * http://www.w3.org/TR/REC-xml-names
@@ -293,11 +293,11 @@ let string_of_tag (ns, _prefix, name) =
   in
     Printf.sprintf "(%S) %s" prefix name
       
-let process_production (tag, state) =
+let process_production (state, tag) =
   let namespaces = Hashtbl.create 1 in
   let () = Hashtbl.add namespaces "xml" ns_xml in
     
-  let rec process_prolog (tag, state) =
+  let rec process_prolog (state, tag) =
     match tag with
       | Xmlparser.Comment _
       | Xmlparser.Doctype _
@@ -306,17 +306,12 @@ let process_production (tag, state) =
           process_prolog (Xmlparser.parse state)
       | Xmlparser.StartElement (name, attrs) ->
           let qname, lnss, attrs = parse_element_head namespaces name attrs in
-          let nextf childs (tag, state) =
+          let nextf childs (state, tag) =
             let el = Xmlelement (qname, attrs, childs) in
               remove_namespaces namespaces lnss;
-              process_epilogue el (tag, state)
+              process_epilogue el (state, tag)
           in
             get_childs qname nextf [] (Xmlparser.parse state)
-      | Xmlparser.EmptyElement (name, attrs) ->
-          let qname, lnss, attrs = parse_element_head namespaces name attrs in
-          let el = Xmlelement (qname, attrs, []) in
-            remove_namespaces namespaces lnss;
-            process_epilogue el (Xmlparser.parse state)
       | Xmlparser.EndOfBuffer ->
           failwith "End of Buffer"
       | Xmlparser.EndOfData ->
@@ -324,20 +319,19 @@ let process_production (tag, state) =
       | _ ->
           failwith "Unexpected tag"
             
-  and get_childs qname nextf childs (tag, state) =
+  and get_childs qname nextf childs (state, tag) =
     match tag with
       | Xmlparser.Whitespace str ->
           get_childs qname nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
-      | Xmlparser.Text str
-      | Xmlparser.Cdata str -> 
+      | Xmlparser.Text str ->
           get_childs qname nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
       | Xmlparser.StartElement (name, attrs) ->
           let qname', lnss, attrs = parse_element_head namespaces name attrs in
-          let newnextf childs' (tag, state) =
+          let newnextf childs' (state, tag) =
             let child = 
               Xmlelement (qname', attrs, childs') in
               remove_namespaces namespaces lnss;
-              get_childs qname nextf (child :: childs) (tag, state)
+              get_childs qname nextf (child :: childs) (state, tag)
           in
             get_childs qname' newnextf [] (Xmlparser.parse state)
       | Xmlparser.EndElement name ->
@@ -348,11 +342,6 @@ let process_production (tag, state) =
               failwith (Printf.sprintf "Bad end tag: expected %s, was %s"
                           (string_of_tag qname)
                           (string_of_tag qname'))
-      | Xmlparser.EmptyElement (name, attrs) ->
-          let qname', lnss, attrs = parse_element_head namespaces name attrs in
-          let child = Xmlelement (qname', attrs, []) in
-            remove_namespaces namespaces lnss;
-            get_childs qname nextf (child :: childs) (Xmlparser.parse state)
       | Xmlparser.Comment _
       | Xmlparser.Pi _ ->
           get_childs qname nextf childs (Xmlparser.parse state)
@@ -363,7 +352,7 @@ let process_production (tag, state) =
       | Xmlparser.EndOfData ->
           raise End_of_file
             
-  and process_epilogue el (tag, state) =
+  and process_epilogue el (state, tag) =
     match tag with
       | Xmlparser.Comment _
       | Xmlparser.Pi _
@@ -376,7 +365,7 @@ let process_production (tag, state) =
       | _ ->
           failwith "Invalid epilogue"
   in
-    process_prolog (tag, state)
+    process_prolog (state, tag)
 
 let parse_document ?unknown_encoding_handler ?entity_resolver buf =
   let p = Xmlparser.create ?unknown_encoding_handler ?entity_resolver () in

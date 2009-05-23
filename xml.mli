@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2008, Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 exception NonXmlelement
@@ -96,5 +96,5 @@ val parse_element_head :
 val string_of_tag : qname -> string
 
 val parse_document :
-  ?unknown_encoding_handler:(string -> char -> (char, int) Fstream.t) ->
+  ?unknown_encoding_handler:(string -> Xmlencoding.decoder) ->
   ?entity_resolver:(string -> string) -> string -> element
