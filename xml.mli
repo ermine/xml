@@ -96,5 +96,5 @@ val parse_element_head :
 val string_of_tag : qname -> string
 
 val parse_document :
-  ?unknown_encoding_handler:(string -> Xmlencoding.decoder) ->
+  ?unknown_encoding_handler:(string -> (string -> int -> Xmlencoding.t)) ->
   ?entity_resolver:(string -> string) -> string -> element

@@ -4,6 +4,7 @@
 
 open Xmlencoding
 
+exception InvalidInput
 exception LexerError of string
 exception UnknownToken of string
 exception UnknownEntity of string
@@ -111,14 +112,14 @@ type parser_t = {
   i : int;
   buffer : string;
   encoding : string;
-  fdecoder : Xmlencoding.decoder;
+  fdecoder : string -> int -> Xmlencoding.t;
   fencoder : int -> char list;
   fencoder_error : Xmlencoding.ucs4 list -> string;
   fparser : parser_t -> parser_t * production;
   entity_resolver : string -> string;
 }
 and lstream = | Lexer of (parser_t -> data -> lstream)
-              | SwitchDecoder of string * Xmlencoding.decoder
+              | SwitchDecoder of string * (string -> int -> Xmlencoding.t)
               | Token of production * (parser_t -> data -> lstream) option * bool
 
 let rec ignore_eob nextf state = function
@@ -1418,19 +1419,19 @@ let process_xmldecl encoding_handler attrs state =
             let fdecoder =
               match up with
                 | "ASCII" | "US-ASCII" ->
-                    Xmlencoding.make_decoder_ascii
+                    Xmlencoding.decode_ascii
                 | "LATIN1" | "ISO-8859-1" ->
-                    Xmlencoding.make_decoder_latin1
+                    Xmlencoding.decode_latin1
                 | "UTF-8" ->
-                    Xmlencoding.make_decoder_utf8
+                    Xmlencoding.decode_utf8
                 | "UTF-16" | "UTF-16BE" ->
-                    Xmlencoding.make_decoder_utf16 BE
+                    Xmlencoding.decode_utf16 BE
                 | "UTF-16LE" ->
-                    Xmlencoding.make_decoder_utf16 BE
+                    Xmlencoding.decode_utf16 BE
                 | "UCS-4" | "UCS-4BE" ->
-                    Xmlencoding.make_decoder_ucs4
+                    Xmlencoding.decode_ucs4
                 | "UCS-4LE" ->
-                    Xmlencoding.make_decoder_ucs4le
+                    Xmlencoding.decode_ucs4le
                 | other ->
                     encoding_handler encoding
             in
@@ -1499,29 +1500,24 @@ let norm_nl state ucs4 =
       Some ucs4
 
 let rec fparser norm_nl_state flexer state =
-  let rec peek_chars acc i = function
-    | 0 -> List.rev acc
-    | j -> peek_chars (state.buffer.[i] :: acc) (i+1) (j-1)
-  in
   let rec get_char norm_nl_state j =
     if j < String.length state.buffer then
-      let n = state.fdecoder.need_bytes state.buffer.[j] in
-        if j+n <= String.length state.buffer then
-          let sl = peek_chars [] j n in
-            match state.fdecoder.decode sl with
+      match state.fdecoder state.buffer j with
+        | Invalid ->
+            raise InvalidInput
+        | TooFew ->
+            if state.finish then
+              raise (LexerError "unexpected end of data")
+            else
+              (norm_nl_state, j, EOB)
+        | Shift k ->
+            get_char norm_nl_state k
+        | Result (k, ucs4) ->
+            match norm_nl norm_nl_state ucs4 with
               | None ->
-                  get_char norm_nl_state (j+n)
+                  get_char true k
               | Some ucs4 ->
-                  match norm_nl norm_nl_state ucs4 with
-                    | None ->
-                        get_char true (j+n)
-                    | Some ucs4 ->
-                        (false, (j+n), UCS4 ucs4)
-        else
-          if state.finish then
-            failwith "Unexpected end of input"
-          else
-            (norm_nl_state, j, EOB)
+                  (false, k, UCS4 ucs4)
     else
       (norm_nl_state, j, EOB)
   in
@@ -1637,22 +1633,22 @@ let create ?encoding ?unknown_encoding_handler ?entity_resolver () =
               encoding = "";
               fencoder = Xmlencoding.encode_utf8;
               fencoder_error = fencoder_error;
-              fdecoder = Xmlencoding.make_decoder_utf8;
+              fdecoder = Xmlencoding.decode_utf8;
               fparser = fparser;
             }
       | Some e ->
           let fdecoder =
             match e with
               | "ASCII" ->
-                  make_decoder_ascii
+                  decode_ascii
               | "LATIN1" ->
-                  make_decoder_latin1
+                  decode_latin1
               | "UTF-8" ->
-                  make_decoder_utf8
+                  decode_utf8
               | "UTF-16" ->
-                  make_decoder_utf16 BE
+                  decode_utf16 BE
               | "UCS-4" ->
-                  make_decoder_ucs4
+                  decode_ucs4
               | _ ->
                   match unknown_encoding_handler with
                     | None ->

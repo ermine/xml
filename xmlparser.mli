@@ -106,21 +106,21 @@ type parser_t = {
   i : int;
   buffer : string;
   encoding : string;
-  fdecoder : Xmlencoding.decoder;
+  fdecoder : string -> int -> Xmlencoding.t;
   fencoder : int -> char list;
   fencoder_error : Xmlencoding.ucs4 list -> string;
   fparser : parser_t -> parser_t * production;
   entity_resolver : string -> string;
 }
 and lstream = | Lexer of (parser_t -> data -> lstream)
-              | SwitchDecoder of string * Xmlencoding.decoder
+              | SwitchDecoder of string * (string -> int -> Xmlencoding.t)
               | Token of production * (parser_t -> data -> lstream) option * bool
 
 val string_of_production : production -> string
 
 val create :
   ?encoding:string ->
-  ?unknown_encoding_handler:(string -> Xmlencoding.decoder) ->
+  ?unknown_encoding_handler:(string -> (string -> int -> Xmlencoding.t)) ->
   ?entity_resolver:(string -> string) -> unit -> parser_t
 
 val add_buffer : parser_t -> string -> parser_t
