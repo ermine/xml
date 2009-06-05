@@ -1,5 +1,5 @@
 (*
-  * (c) 2004-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2004-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
 type element =
@@ -38,9 +38,9 @@ let rec get_tag (el:element) (path:string list) =
           let name = List.hd path in
           let ctag = List.find
             (function
-               | Xmlelement (name1, _,_) when name1 = name -> 
-			             true
-               | _ -> 
+               | Xmlelement (name1, _,_) ->
+                   name = name1
+               | Xmlcdata _ ->
 			             false
             ) els in
             get_tag ctag (List.tl path)
@@ -51,7 +51,7 @@ let get_tag_full_path el path =
     | Xmlelement (tag, _,_) ->
         if tag = List.hd path then get_tag el (List.tl path)
         else raise Not_found
-    | Xmlcdata cdata -> 
+    | Xmlcdata _cdata -> 
 	      raise NonXmlelement
           
 let get_subel ?(path=[]) el =
@@ -59,9 +59,9 @@ let get_subel ?(path=[]) el =
     | Xmlelement (_, _, els) ->
 	      List.find (function
 			               | Xmlelement (_, _, _) -> true
-			               | _ -> false
+			               | Xmlcdata _ -> false
 		              ) els
-    | _ -> raise NonXmlelement
+    | Xmlcdata _ -> raise NonXmlelement
         
 let get_subels ?(path=[]) ?(tag="") el =
   match get_tag el path with
@@ -71,33 +71,32 @@ let get_subels ?(path=[]) ?(tag="") el =
 	      else
           List.find_all (function x ->
                            match x with
-                             | Xmlelement (tag1, _,_) when tag1=tag -> 
-					                       true
-                             | _ -> false
+                             | Xmlelement (tag1, _,_) -> tag1 = tag
+                             | Xmlcdata _ -> false
                         ) els
-    | _ -> 
+    | Xmlcdata _ -> 
 	      raise NonXmlelement
           
 let get_attr_s el ?(path=[]) (attrname:string) =
   match get_tag el path with
     | Xmlelement (_, attrs, _) ->
         List.assoc attrname attrs
-    | _ -> raise NonXmlelement
+    | Xmlcdata _ -> raise NonXmlelement
         
 let filter_attrs attrs =
-  let checker (k,v) = if v = "" then false else true in
+  let checker (_k,v) = if v = "" then false else true in
     List.filter checker attrs
       
 let rec collect_cdata els acc =
   match els with
-    | (Xmlcdata cdata) :: l -> collect_cdata l (cdata :: acc)
-    | _ :: l -> collect_cdata l acc
     | [] -> String.concat "" (List.rev acc)
+    | (Xmlcdata cdata) :: l -> collect_cdata l (cdata :: acc)
+    | Xmlelement _ :: l -> collect_cdata l acc
         
 let get_cdata ?(path=[]) el =
   match get_tag el path with
     | Xmlelement (_, _, els) -> collect_cdata els []
-    | _ -> raise NonXmlelement
+    | Xmlcdata _ -> raise NonXmlelement
         
 let make_element name attrs els =
   Xmlelement (name, attrs, els)
@@ -109,41 +108,45 @@ let safe_get_attr_s xml ?(path=[]) attrname =
   try get_attr_s xml ~path attrname with _ -> ""
     
 let match_tag tag element =
-  match element with
-    | Xmlelement (tag1, _, _) when tag1 = tag -> ();
-    | _ ->
-	      raise (Expected tag)
+  let b = 
+    match element with
+      | Xmlelement (tag1, _, _) -> tag1 = tag
+      | Xmlcdata _ -> false
+  in
+    if not b then
+	    raise (Expected tag)
           
 let exists_element tag els =
   List.exists (function
-		             | Xmlelement (tag1, _, _) when tag1 = tag ->
-			               true
-		             | _ ->
-			               false
+		             | Xmlelement (tag1, _, _) -> tag1 = tag
+		             | Xmlcdata _ -> false
 	            ) els
     
     
 let find_subtag (subels:element list) (tag:string) =
   List.find (function
-               | Xmlelement (tag1, _, _) when tag1=tag -> true
-               | _ -> false
+               | Xmlelement (tag1, _, _) -> tag1=tag
+               | Xmlcdata _ -> false
             ) subels
     
 let get_tagname el =
   match el with
     | Xmlelement (name, _, _) -> name
-    | _ -> raise NonXmlelement
+    | Xmlcdata _ -> raise NonXmlelement
         
 let match_xml el tag (attrs:(string * string) list) =
   match el with
-    | Xmlelement (name, _, _) when name = tag ->
-	      (try
-           List.iter (fun (a, v) ->
-			                  if get_attr_s el a <> v then 
-				                  raise Not_found) attrs;
-           true
-	       with _ -> false)
-    | _ -> false
+    | Xmlelement (name, _, _) ->
+        if name = tag then
+	        (try
+             List.iter (fun (a, v) ->
+			                    if get_attr_s el a <> v then 
+				                    raise Not_found) attrs;
+             true
+           with _ -> false)
+        else
+          false
+    | Xmlcdata _ -> false
         
 let mem_xml xml path tag attrs =
   if get_tagname xml <> List.hd path then false
@@ -184,7 +187,8 @@ let process_production (state, tag) =
           failwith "End of Buffer"
       | Xmlparser.EndOfData ->
           raise End_of_file
-      | _ ->
+      | Xmlparser.EndElement _
+      | Xmlparser.Text _ ->
           failwith "Unexpected tag"
             
   and get_childs name nextf childs (state, tag) =
@@ -226,7 +230,10 @@ let process_production (state, tag) =
           failwith "End Of Buffer"
       | Xmlparser.EndOfData ->
           el
-      | _ ->
+      | Xmlparser.Text _
+      | Xmlparser.Doctype _
+      | Xmlparser.StartElement _
+      | Xmlparser.EndElement _ ->
           failwith "Invalid epilogue"
   in
     process_prolog (state, tag)

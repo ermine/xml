@@ -135,7 +135,7 @@ let rec skip_blank nextf =
              )
 
 let after_blank nextf =
-  ignore_eob (fun state ucs4 ->
+  ignore_eob (fun _state ucs4 ->
                 if Xmlchar.is_space ucs4 then
                   Lexer (skip_blank nextf)
                 else
@@ -168,7 +168,7 @@ let get_word nextf state ucs4 =
   in
     aux_get_word state ucs4
 
-let expected_char ucs4 f state ucs4' =
+let expected_char ucs4 f _state ucs4' =
   if ucs4' = ucs4 then f
   else
     raise (LexerError (Printf.sprintf "expected char %c, met %c"
@@ -186,7 +186,7 @@ let fencoder_string state uclist =
  * Gives a quoted string
  * ("'" [^"'"]* "'") | ('"' [^'"']* '"')
  *)
-let parse_string nextf state ucs4 =
+let parse_string nextf _state ucs4 =
   let buf = Buffer.create 30 in
   let rec get_text qt state ucs4 =
     if ucs4 = qt then
@@ -262,7 +262,7 @@ let parse_nmtoken nextf state ucs4 =
  *)
 let parse_charref nextf state ucs4 =
   let parse_decimal_charref nextf state ucs4 =
-    let rec get_decimal acc state ucs4 =
+    let rec get_decimal acc _state ucs4 =
       if ucs4 >= Xmlchar.u_0 && ucs4 <= Xmlchar.u_9 then
         next_char (get_decimal (acc * 10 + (ucs4 - Xmlchar.u_0)))
       else if ucs4 = Xmlchar.u_semicolon then
@@ -340,7 +340,7 @@ let parse_entityref buf nextf state ucs4 =
  *                                          [WFC: In DTD]
  *)
 let parse_PEreference nextf state ucs4 =
-  parse_name (fun name state ucs4 -> if ucs4 = Xmlchar.u_semicolon then
+  parse_name (fun name _state ucs4 -> if ucs4 = Xmlchar.u_semicolon then
                 nextf name
               else
                 raise (LexerError "expected %Name;")
@@ -365,7 +365,7 @@ let parse_reference buf nextf state ucs4 =
  *                       "'"
  * [69] PEReference  ::= '%' Name ';
  *)
-let parse_entity_value nextf state ucs4 =
+let parse_entity_value nextf _state ucs4 =
   let buf = Buffer.create 30 in
   let rec get_value qt state ucs4 =
     if ucs4 = qt then
@@ -394,7 +394,7 @@ let parse_entity_value nextf state ucs4 =
  *                      | "'" ([^<&'] | Reference)* "'"
  *)
 (*  Implements also (partially) 3.3.3 Attribute-Value Normalization *)
-let parse_attvalue nextf state ucs4 =
+let parse_attvalue nextf _state ucs4 =
   let buf = Buffer.create 30 in
   let rec get_value qt state ucs4 =
     if ucs4 = qt then
@@ -485,7 +485,7 @@ let parse_whitespace state ucs4 =
 (*
  * [15] Comment ::= '<!--' ((Char - '-') | ('-' (Char - '-')))* '-->'
  *)
-let parse_comment nextf state ucs4 =
+let parse_comment nextf _state ucs4 =
   let buf = Buffer.create 30 in
     if ucs4 = Xmlchar.u_dash then
       let rec get_comment state ucs41 =
@@ -524,10 +524,10 @@ let parse_comment nextf state ucs4 =
  *)
 let parse_pi nextf =
   parse_name
-    (fun target state ucs4 ->
-       let rec get_pi_content acc state ucs41 =
+    (fun target _state ucs4 ->
+       let rec get_pi_content acc _state ucs41 =
          if ucs41 = Xmlchar.u_quest then
-           next_char (fun state ucs42 ->
+           next_char (fun _state ucs42 ->
                         if ucs42 = Xmlchar.u_gt then
                           nextf target (List.rev acc)
                         else
@@ -541,7 +541,7 @@ let parse_pi nextf =
              (fun state ucs4 -> skip_blank (get_pi_content []) state (UCS4 ucs4))
          else if ucs4 = Xmlchar.u_quest then
            next_char
-             (fun state ucs4 ->
+             (fun _state ucs4 ->
                 if ucs4 = Xmlchar.u_gt then
                   nextf target []
                 else
@@ -564,7 +564,7 @@ let parse_system_literal nextf state ucs4 = parse_string nextf state ucs4
  *)
 let parse_pubid_literal nextf state ucs4 =
   let buf = Buffer.create 30 in
-  let rec get_value qt state ucs4 =
+  let rec get_value qt _state ucs4 =
     if ucs4 = qt then
       let value = Buffer.contents buf in
         Buffer.reset buf;
@@ -621,7 +621,7 @@ let parse_external_id nextf state ucs4 =
 let parse_children nextf state ucs4 =
   let rec get_cp_list nextf state ucs4 =
     get_item
-      (fun item state ucs4 ->
+      (fun item _state ucs4 ->
          if ucs4 = Xmlchar.u_pipe then
            Lexer (skip_blank (aux_get_cp_list ucs4
                                 (fun cps -> nextf (`Choice cps)) [item]))
@@ -638,7 +638,7 @@ let parse_children nextf state ucs4 =
   and get_item nextf state ucs4 =
     if ucs4 = Xmlchar.u_openparen then
       get_item
-        (fun item state ucs4 ->
+        (fun item _state ucs4 ->
            if ucs4 = Xmlchar.u_pipe then
              Lexer (skip_blank (aux_get_cp_list ucs4
                                   (fun cps -> nextf (`Choice cps)) [item]))
@@ -660,7 +660,7 @@ let parse_children nextf state ucs4 =
                                  ) state ucs4) state ucs4
   and aux_get_cp_list sep nextf acc state ucs4 =
     get_item
-      (fun item state ucs4 ->
+      (fun item _state ucs4 ->
          if ucs4 = sep then
            Lexer (skip_blank (aux_get_cp_list sep nextf (item :: acc)))
          else if ucs4 = Xmlchar.u_closeparen then
@@ -692,7 +692,7 @@ let parse_children nextf state ucs4 =
  *                                                     [VC: No Duplicate
  *)
 let parse_contentspec nextf state ucs4 =
-  let rec get_list nextf acc state ucs4 =
+  let rec get_list nextf acc _state ucs4 =
     if ucs4 = Xmlchar.u_pipe then
       Lexer (skip_blank
                (parse_name
@@ -864,7 +864,7 @@ let parse_attdefs nextf attname state ucs4 =
       ) state (UCS4 ucs4)
   and get_list f (nextf: string list -> lstream) acc state ucs4  =
     f (fun name state ucs4 ->
-         skip_blank (fun state ucs4 ->
+         skip_blank (fun _state ucs4 ->
                        if ucs4 = Xmlchar.u_pipe then
                          Lexer (skip_blank (get_list f nextf (name :: acc)))
                        else if ucs4 = Xmlchar.u_closeparen then
@@ -1040,7 +1040,7 @@ let parse_notationdecl nextf state ucs4 =
   in
     parse_name (fun name state ucs4 ->
                   after_blank (get_external_id
-                                 (fun ext_id state ucs4 ->
+                                 (fun ext_id _state ucs4 ->
                                     if ucs4 = Xmlchar.u_gt then
                                       nextf (`NotationDecl (name, ext_id))
                                     else
@@ -1064,7 +1064,7 @@ let parse_notationdecl nextf state ucs4 =
  * [78] extParsedEnt ::= TextDecl? content
  *)
 let parse_intsubset mark_end nextf state ucs4 =
-  let rec get_list acc state data =
+  let rec get_list acc _state data =
     if data = mark_end then
       nextf (List.rev acc)
     else match data with
@@ -1084,7 +1084,7 @@ let parse_intsubset mark_end nextf state ucs4 =
                    raise (LexerError "expected '!' or '?'")
               )
           else if ucs4 = Xmlchar.u_percent then
-            next_char (parse_name (fun name state ucs4 ->
+            next_char (parse_name (fun name _state ucs4 ->
                                      if ucs4 = Xmlchar.u_semicolon then
                                        go_list acc (`DeclSect name)
                                      else                            
@@ -1092,7 +1092,7 @@ let parse_intsubset mark_end nextf state ucs4 =
                                   ))
           else
             raise (LexerError "expected '<' or ']'")
-      | _ ->
+      | EOB ->
           raise (LexerError "expected '<' or ']'")
   and parse_markupdecl_with_excl nextf state ucs4 =
     get_word (fun word state ucs4 ->
@@ -1138,7 +1138,7 @@ let parse_intsubset mark_end nextf state ucs4 =
  *)
 let parse_doctype nextf state ucs4 =
   let dtd_name f = after_blank (parse_name f) in
-  let dtd_external_id f name state ucs4 =
+  let dtd_external_id f name _state ucs4 =
     if ucs4 = Xmlchar.u_gt then
       nextf {dtd_name = name; dtd_external_id = None; dtd_intsubset = []}
     else if Xmlchar.is_space ucs4 then
@@ -1156,7 +1156,7 @@ let parse_doctype nextf state ucs4 =
     else
       raise (LexerError "expected space or '>'")
   in
-  let dtd_intsubset name ext_id state ucs4 =
+  let dtd_intsubset name ext_id _state ucs4 =
     if ucs4 = Xmlchar.u_openbr then
       Lexer (skip_blank
                (parse_intsubset (UCS4 Xmlchar.u_closebr)
@@ -1388,7 +1388,7 @@ let opened_lt state ucs4 =
       (fun name attrs flag ->
          if not flag then
            Token (StartElement (name, List.rev attrs),
-                  Some (fun state data ->
+                  Some (fun _state _data ->
                           Token ((EndElement name), None, false)),
                   true)
          else
@@ -1432,7 +1432,7 @@ let process_xmldecl encoding_handler attrs state =
                     Xmlencoding.decode_ucs4
                 | "UCS-4LE" ->
                     Xmlencoding.decode_ucs4le
-                | other ->
+                | _ ->
                     encoding_handler encoding
             in
               SwitchDecoder (encoding, fdecoder)
