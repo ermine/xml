@@ -5,7 +5,7 @@
 exception NonXmlelement
 exception InvalidNS
 
-type namespace = [ `None | `URI of string ]
+type namespace = string option
 type prefix = string
 type ncname = string
 type name = ncname

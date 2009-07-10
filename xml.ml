@@ -8,10 +8,7 @@
 exception NonXmlelement
 exception InvalidNS
 
-type namespace = [
-| `URI of string
-| `None
-]
+type namespace = string option
 
 type prefix = string
 
@@ -29,9 +26,9 @@ type element =
   | Xmlelement of qname * attribute list * element list
   | Xmlcdata of cdata
 
-let ns_xml = `URI "http://www.w3.org/XML/1998/namespace"
+let ns_xml = Some "http://www.w3.org/XML/1998/namespace"
 
-let no_ns = `None
+let no_ns = None
 
 let encode = Xml_encode.encode
 let decode = Xml_decode.decode
@@ -45,8 +42,8 @@ struct
 
    let bind_prefix t prefix namespace =
      match namespace with
-       | `None -> raise InvalidNS
-       | `URI str -> Hashtbl.add t.bindings str prefix
+       | None -> raise InvalidNS
+       | Some str -> Hashtbl.add t.bindings str prefix
              
    let create default_nss =
      let bindings = Hashtbl.create 5 in
@@ -59,8 +56,8 @@ struct
 
    let string_of_qname t (ns, _prefix, name) =
      match ns with
-       | `None -> name
-       | `URI str -> 
+       | None -> name
+       | Some str -> 
            let prefix =
              try Hashtbl.find t.bindings str with Not_found -> "" in
              if prefix = "" then
@@ -78,8 +75,8 @@ struct
          
    let string_of_ns t ns =
      match ns with 
-       | `None -> ""
-       | `URI str ->
+       | None -> ""
+       | Some str ->
            let prefix = 
              try Hashtbl.find t.bindings str with Not_found -> "" in
              if prefix = "" then
@@ -105,7 +102,7 @@ struct
                            ns :: acc) lnss attrs
          
    let rec aux_serialize lnss t out = function
-     | Xmlelement ((ns, _prefix, _name) as qname, attrs, children) ->
+     | Xmlelement ((_ns, _prefix, _name) as qname, attrs, children) ->
          out "<";
          out (string_of_qname t qname);
          if attrs <> [] then (
@@ -138,7 +135,7 @@ end
 
 let get_qname = function
   | Xmlelement (qname, _, _) -> qname
-  | _ -> raise NonXmlelement
+  | Xmlcdata _ -> raise NonXmlelement
       
 let get_namespace (namespace, _prefix, _name) = namespace
 
@@ -159,7 +156,7 @@ let get_attrs ?ns = function
         | None -> attrs
         | Some v -> List.find_all (fun ((ns', _, _), _) -> ns' = v) attrs
     )
-  | _ -> raise NonXmlelement
+  | Xmlcdata _ -> raise NonXmlelement
       
 let get_attr_value ?ns ?(can_be_prefixed=false) name attrs =
   let (_, value) =
@@ -176,19 +173,19 @@ let get_element ?ns ?(can_be_prefixed=false) name childs =
   List.find (function
                | Xmlelement (qname, _, _) ->
                    match_qname ?ns ~can_be_prefixed name qname
-               | _ -> false
+               | Xmlcdata _ -> false
             ) childs
     
 let get_elements ?ns ?(can_be_prefixed=false) name childs =
   List.filter (function
                  | Xmlelement (qname, _, _) ->
                      match_qname ?ns ~can_be_prefixed name qname
-                 | Xmlcdata cdata -> false
+                 | Xmlcdata _ -> false
               ) childs
     
 let get_children = function
   | Xmlelement (_, _, children) -> children
-  | _ -> raise NonXmlelement
+  | Xmlcdata _ -> raise NonXmlelement
       
 let get_subelement ?ns ?(can_be_prefixed=false) name el =
   get_element ?ns ~can_be_prefixed name (get_children el)
@@ -199,21 +196,21 @@ let get_subelements ?ns ?(can_be_prefixed=false) name el =
 let get_first_element els =
   List.find (function
                | Xmlelement _ -> true
-               | _ -> false) els
+               | Xmlcdata _ -> false) els
     
 let get_cdata el =
   let childs = get_children el in
   let rec collect_cdata acc = function
     | [] -> String.concat "" (List.rev acc)
-    | (Xmlcdata cdata) :: l -> collect_cdata (cdata :: acc) l
-    | _ :: l -> collect_cdata acc l
+    | Xmlcdata cdata :: l -> collect_cdata (cdata :: acc) l
+    | Xmlelement _ :: l -> collect_cdata acc l
   in
     collect_cdata [] childs
       
 let remove_cdata els =
   List.filter (function
                  | Xmlelement _ -> true
-                 | _ -> false) els
+                 | Xmlcdata _ -> false) els
     
 let make_element qname attrs children =
   Xmlelement (qname, attrs, children)
@@ -230,7 +227,7 @@ let mem_qname ?ns ?(can_be_prefixed=false) name els =
   List.exists (function
                  | Xmlelement (qname, _, _) ->
                      match_qname ?ns ~can_be_prefixed name qname
-                 | _ -> false) els
+                 | Xmlcdata _ -> false) els
     
 let mem_child ?ns ?(can_be_prefixed=false) name el =
   mem_qname ?ns ~can_be_prefixed name (get_children el)
@@ -245,9 +242,9 @@ let split_attrs attrs =
   List.fold_left (fun (nss, attrs) (name, value) ->
                     let prefix, lname = Xmlparser.split_name name in
                       if prefix = "" && lname = "xmlns" then
-                        ((`URI value, "") :: nss), attrs
+                        ((Some value, "") :: nss), attrs
                       else if prefix = "xmlns" && lname <> "" then
-                        ((`URI value, lname) :: nss) , attrs
+                        ((Some value, lname) :: nss) , attrs
                       else
                         nss, (((prefix, lname), value) :: attrs)
                  ) ([], []) attrs
@@ -256,7 +253,7 @@ let add_namespaces namespaces nss =
   List.iter (fun (ns, prefix) -> Hashtbl.add namespaces prefix ns) nss
     
 let remove_namespaces namespaces nss =
-  List.iter (fun (ns, prefix) -> Hashtbl.remove namespaces prefix) nss
+  List.iter (fun (_ns, prefix) -> Hashtbl.remove namespaces prefix) nss
     
 let parse_qname nss (prefix, lname) =
   try
@@ -288,8 +285,8 @@ let parse_element_head namespaces name attrs =
 let string_of_tag (ns, _prefix, name) =
   let prefix =
     match ns with
-      | `None -> ""
-      | `URI str -> "URI " ^ str
+      | None -> ""
+      | Some str -> "URI " ^ str
   in
     Printf.sprintf "(%S) %s" prefix name
       
@@ -316,7 +313,8 @@ let process_production (state, tag) =
           failwith "End of Buffer"
       | Xmlparser.EndOfData ->
           raise End_of_file
-      | _ ->
+      | Xmlparser.Text _
+      | Xmlparser.EndElement _ ->
           failwith "Unexpected tag"
             
   and get_childs qname nextf childs (state, tag) =
@@ -362,7 +360,10 @@ let process_production (state, tag) =
           failwith "End Of Buffer"
       | Xmlparser.EndOfData ->
           el
-      | _ ->
+      | Xmlparser.Text _
+      | Xmlparser.Doctype _
+      | Xmlparser.StartElement _
+      | Xmlparser.EndElement _ ->
           failwith "Invalid epilogue"
   in
     process_prolog (state, tag)

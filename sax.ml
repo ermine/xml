@@ -70,7 +70,10 @@ let create
           (state, process_epilogue)
       | EndOfData ->
           raise End_of_file
-      | _ ->
+      | Doctype _
+      | EndElement _
+      | StartElement _
+      | Text _->
           failwith "Unexpected tag in epilogue"
     
   and process_prolog (state, tag) =
@@ -80,9 +83,9 @@ let create
           process_prolog (parse state)
       | Doctype _dtd ->
           process_prolog (parse state)
-      | StartElement (name, attrs) ->
+      | StartElement _ ->
           process_production (state, tag)
-      | Whitespace space ->
+      | Whitespace _space ->
           process_prolog (parse state)
       | Pi (target, data) ->
           pi_handler target data;

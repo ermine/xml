@@ -88,7 +88,10 @@ let create
           (state, process_epilogue)
       | EndOfData ->
           raise End_of_file
-      | _ ->
+      | Doctype _
+      | StartElement _
+      | EndElement _
+      | Text _ ->
           failwith "Unexpected tag in epilogue"
           
   and process_prolog (state, tag) =
@@ -103,13 +106,14 @@ let create
           process_prolog (Xmlparser.parse state)
       | StartElement _ ->
           process_production (state, tag)
-      | Whitespace space ->
+      | Whitespace _space ->
           process_prolog (Xmlparser.parse state)
       | EndOfBuffer ->
           (state, process_prolog)
       | EndOfData ->
           raise End_of_file
-      | _ ->
+      | Text _
+      | EndElement _ ->
           failwith "Unexpected tag"
   in        
   let state = Xmlparser.create

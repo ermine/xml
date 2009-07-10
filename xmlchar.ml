@@ -197,7 +197,7 @@ let is_namechar uchar =
 (*
  * [3] S         ::= (#x20 | #x9 | #xD | #xA)+
  *)
-  let is_space = function
+let is_space = function
   | 0x20 | 0x09 | 0x0D | 0x0A -> true
   | _ -> false
       
