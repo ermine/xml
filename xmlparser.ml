@@ -1750,21 +1750,3 @@ let set_entity_resolver state entity_resolver =
 
 let get_rest_buffer state =
   String.sub state.buffer state.i (String.length state.buffer - state.i)
-  
-let decode = Xml_decode.decode
-let encode = Xml_encode.encode
-
-let split_name name =
-  if String.contains name ':' then
-    let idx = String.index name ':' in
-    let prefix = String.sub name 0 idx in
-    let lname =
-      if idx+1 > String.length name then
-        ""
-      else
-        String.sub name (idx+1) (String.length name - (idx+1))
-    in
-      prefix, lname
-  else
-    "", name
-

@@ -136,9 +136,3 @@ val parse_dtd : string -> parser_t * production
 val set_entity_resolver : parser_t -> (string -> string) -> parser_t
 
 val get_rest_buffer : parser_t -> string
-
-val decode : string -> string
-
-val encode : string -> string
-
-val split_name : string -> string * string

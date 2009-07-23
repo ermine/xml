@@ -237,14 +237,30 @@ let iter f el = List.iter f (get_children el)
 (*
  * Parsing
  *)
-  
+
+let split_name name =
+  if String.contains name ':' then
+    let idx = String.index name ':' in
+    let prefix = String.sub name 0 idx in
+    let lname =
+      if idx+1 > String.length name then
+        ""
+      else
+        String.sub name (idx+1) (String.length name - (idx+1))
+    in
+      prefix, lname
+  else
+    "", name
+
 let split_attrs attrs =
   List.fold_left (fun (nss, attrs) (name, value) ->
-                    let prefix, lname = Xmlparser.split_name name in
+                    let prefix, lname = split_name name in
                       if prefix = "" && lname = "xmlns" then
-                        ((Some value, "") :: nss), attrs
+                        let ns = if value = "" then None else Some value in
+                          ((ns, "") :: nss), attrs
                       else if prefix = "xmlns" && lname <> "" then
-                        ((Some value, lname) :: nss) , attrs
+                        let ns = if value = "" then None else Some value in
+                          ((ns, lname) :: nss) , attrs
                       else
                         nss, (((prefix, lname), value) :: attrs)
                  ) ([], []) attrs
@@ -278,7 +294,7 @@ let parse_attrs nss attrs =
 let parse_element_head namespaces name attrs =
   let lnss, attrs = split_attrs attrs in
     add_namespaces namespaces lnss;
-    let qname = parse_qname namespaces (Xmlparser.split_name name) in
+    let qname = parse_qname namespaces (split_name name) in
     let attrs =  parse_attrs namespaces attrs in
       qname, lnss, attrs
         
@@ -333,7 +349,7 @@ let process_production (state, tag) =
           in
             get_childs qname' newnextf [] (Xmlparser.parse state)
       | Xmlparser.EndElement name ->
-          let qname' = parse_qname namespaces (Xmlparser.split_name name) in
+          let qname' = parse_qname namespaces (split_name name) in
             if qname = qname' then
               nextf (List.rev childs) (Xmlparser.parse state)
             else 

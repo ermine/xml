@@ -25,9 +25,14 @@ let _ =
     Printf.printf "%s" cdata;
   in
   let unknown_encoding_handler encoding =
-    Printf.printf "make_decoder %s" encoding;
-    Conversion.make_decoder encoding
-  in
+    let decoder = Conversion.make_decoder encoding in
+      fun str i ->
+        match decoder str i with
+          | Cs.Shift j -> Xmlencoding.Shift j
+          | Cs.Invalid -> Xmlencoding.Invalid
+          | Cs.TooFew -> Xmlencoding.TooFew
+          | Cs.Result (j, ucs4) -> Xmlencoding.Result (j, ucs4)
+  in    
   let pi_handler target data =
     Printf.printf "<?%s %s?>" target data
   in

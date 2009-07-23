@@ -74,6 +74,8 @@ val mem_child : ?ns:namespace -> ?can_be_prefixed:bool -> name ->
   element -> bool
 val iter : (element -> unit) -> element -> unit
 
+val split_name : string -> prefix * ncname
+
 val split_attrs :
   (string * string) list ->
   (namespace * string) list * ((string * string) * string) list
@@ -98,3 +100,5 @@ val string_of_tag : qname -> string
 val parse_document :
   ?unknown_encoding_handler:(string -> (string -> int -> Xmlencoding.t)) ->
   ?entity_resolver:(string -> string) -> string -> element
+
+  

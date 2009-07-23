@@ -1,2 +1,2 @@
-<test1.{ml,byte,native}>: rectypes
+<test{1,2}.{ml,byte,native}>: rectypes
 

@@ -6,8 +6,8 @@ open Printf
 open Xml
 
 let string_of_ns = function
-  | `URI uri -> Printf.sprintf "URI %S" uri
-  | `None -> "None"
+  | Some uri -> Printf.sprintf "URI %S" uri
+  | None -> "None"
 
 let start_ns_handler (ns, prefix) =
   printf "NS start %s %s\n" prefix (string_of_ns ns)
@@ -15,13 +15,13 @@ let start_ns_handler (ns, prefix) =
 let end_ns_handler (ns, prefix) =
   printf "NS end %s %s\n" prefix (string_of_ns ns)
     
-let start_element_handler (ns, lname) attrs =
+let start_element_handler (ns, _prefix, lname) attrs =
   printf "StartElement (%s) %s\n" (string_of_ns ns) lname;
-  List.iter (fun ((ns, lname), value) ->
+  List.iter (fun ((ns, _prefix, lname), value) ->
                Printf.printf "   (%s) %s='%s'\n" (string_of_ns ns) lname value)
     attrs
     
-let end_element_handler (ns, lname) =
+let end_element_handler (ns, _prefix, lname) =
   printf "EndElement (%s) %s\n" (string_of_ns ns) lname
     
 let character_data_handler cdata =
@@ -34,8 +34,13 @@ let pi_handler target data =
   printf "Pi %s %s\n" target data
     
 let unknown_encoding_handler encoding =
-   printf "make_decoder %s\n" encoding;
-  Conversion.make_decoder encoding
+  let decoder = Conversion.make_decoder encoding in
+    fun str i ->
+      match decoder str i with
+        | Cs.Shift j -> Xmlencoding.Shift j
+        | Cs.Invalid -> Xmlencoding.Invalid
+        | Cs.TooFew -> Xmlencoding.TooFew
+        | Cs.Result (j, ucs4) -> Xmlencoding.Result (j, ucs4)
     
 let entity_resolver entity =
   failwith (sprintf "Unknown entity: %s" entity)
