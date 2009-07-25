@@ -153,7 +153,7 @@ let get_attr_value ?ns name attrs =
   let (_, value) =
     List.find (fun (qname, _) ->
                  match ns with
-                   | None -> true
+                   | None -> (no_ns, name) = qname
                    | Some v -> (v, name) = qname
               ) attrs
   in
