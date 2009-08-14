@@ -26,17 +26,19 @@ val decode : string -> string
 module Serialization :
   sig
     type t = {
+      mutable tmp_prefix : int;
       default_nss : namespace list;
       bindings : (string, string) Hashtbl.t;
     }
+    val get_default_nss : t -> namespace list
     val bind_prefix : t -> string -> namespace -> unit
     val create : namespace list -> t
     val string_of_qname : t -> qname -> string
     val string_of_attr : t -> attribute -> string
     val string_of_list : ('a -> string) -> string -> 'a list -> string
-    val string_of_ns : t -> namespace -> string
     val local_namespaces :
-      t -> qname -> attribute list -> namespace list -> namespace list
+      namespace list -> t -> qname -> attribute list -> namespace list
+    val string_of_ns : t -> namespace -> string
     val aux_serialize :
       namespace list -> t -> (string -> unit) -> element -> unit
     val serialize_document : t -> (string -> unit) -> element -> unit
@@ -56,6 +58,7 @@ val get_children : element -> element list
 val get_subelement : qname -> element -> element
 val get_subelements : qname -> element -> element list
 val get_first_element : element list -> element
+val collect_cdata : element list -> string
 val get_cdata : element -> string
 val remove_cdata : element list -> element list
 val make_element : qname -> attribute list -> element list -> element

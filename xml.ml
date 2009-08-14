@@ -36,9 +36,12 @@ let decode = Xml_decode.decode
 module Serialization =
 struct
   type t = {
+    mutable tmp_prefix: int;
     default_nss: namespace list;
     bindings: (string, string) Hashtbl.t
   }
+
+  let get_default_nss t = t.default_nss
 
    let bind_prefix t prefix namespace =
      match namespace with
@@ -47,23 +50,25 @@ struct
              
    let create default_nss =
      let bindings = Hashtbl.create 5 in
-     let t =
-       { default_nss = default_nss;
-         bindings = bindings
-       } in
+     let t = {
+       tmp_prefix = 0;
+       default_nss = default_nss;
+       bindings = bindings
+     } in
        bind_prefix t "xml" ns_xml;
        t
 
    let string_of_qname t (ns, name) =
-     match ns with
-       | None -> name
-       | Some str -> 
-           let prefix =
-             try Hashtbl.find t.bindings str with Not_found -> "" in
-             if prefix = "" then
-               name
-             else
-               prefix ^ ":" ^ name
+     let prefix =
+       match ns with
+         | None -> ""
+         | Some str ->
+             try Hashtbl.find t.bindings str with Not_found -> ""
+     in
+       if prefix = "" then
+         name
+       else
+         prefix ^ ":" ^ name
                  
    let string_of_attr t (qname, value) =
      (string_of_qname t qname) ^ "='" ^ encode value ^ "'"
@@ -73,21 +78,9 @@ struct
      | x :: [] -> f x
      | x :: xs -> List.fold_left (fun res x -> res ^ sep ^ (f x)) (f x) xs
          
-   let string_of_ns t ns =
-     match ns with 
-       | None -> ""
-       | Some str ->
-           let prefix = 
-             try Hashtbl.find t.bindings str with Not_found -> "" in
-             if prefix = "" then
-               "xmlns='" ^ encode str ^ "'"
-             else
-               "xmlns:" ^ prefix ^ "='" ^ encode  str ^ "'"
-                 
-                 
-   let local_namespaces t (ns, _name) attrs lnss =
+   let local_namespaces lnss t (ns, _name) attrs =
      let lnss =
-       if List.mem ns t.default_nss || List.mem ns lnss then
+       if List.mem ns lnss || List.mem ns t.default_nss then
          lnss
        else
          ns :: lnss
@@ -99,21 +92,42 @@ struct
                            List.mem ns lnss then
                              acc
                          else
-                           ns :: acc) lnss attrs
+                           match ns with
+                             | None -> acc
+                             | Some str ->
+                                 if not (Hashtbl.mem t.bindings str) then (
+                                   t.tmp_prefix <- t.tmp_prefix + 1;
+                                   let p = "ns" ^ string_of_int t.tmp_prefix in
+                                     bind_prefix t p ns;
+                                 );
+                                 ns :: acc
+                      ) lnss attrs
          
+   let string_of_ns t = function
+     | None ->
+         "xmlns=''"
+     | Some str ->
+         let prefix =
+           try Hashtbl.find t.bindings str
+           with Not_found -> ""
+         in
+           if prefix = "" then
+             "xmlns='" ^ encode str ^ "'"
+           else
+             "xmlns:" ^ prefix ^ "='" ^ encode  str ^ "'"
+
    let rec aux_serialize lnss t out = function
-     | Xmlelement ((_ns, _name) as qname, attrs, children) ->
-         out "<";
-         out (string_of_qname t qname);
-         if attrs <> [] then (
-           out " ";
-           out (string_of_list (string_of_attr t) " " attrs)
-         );
-         let lnss = local_namespaces t qname attrs lnss in
+     | Xmlelement (qname, attrs, children) ->
+         let lnss = local_namespaces lnss t qname attrs in
+           out "<";
+           out (string_of_qname t qname);
+           if attrs <> [] then (
+             out " ";
+             out (string_of_list (string_of_attr t) " " attrs)
+           );
            if lnss <> [] then (
              out " ";
-             out (string_of_list (string_of_ns t) " " lnss)
-           );
+             out (string_of_list (string_of_ns t) " " lnss));
            if children = [] then
              out "/>"
            else (
@@ -189,14 +203,15 @@ let get_first_element els =
                | Xmlelement _ -> true
                | Xmlcdata _ -> false) els
     
+let collect_cdata  els =
+  let res =List.fold_left (fun acc -> function
+                             | Xmlcdata cdata -> cdata :: acc
+                             | Xmlelement _ -> acc
+                          ) [] els in
+    String.concat "" (List.rev res)
+
 let get_cdata el =
-  let childs = get_children el in
-  let rec collect_cdata acc = function
-    | [] -> String.concat "" (List.rev acc)
-    | Xmlcdata cdata :: l -> collect_cdata (cdata :: acc) l
-    | Xmlelement _ :: l -> collect_cdata acc l
-  in
-    collect_cdata [] childs
+  collect_cdata (get_children el)
       
 let remove_cdata els =
   List.filter (function
