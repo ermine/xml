@@ -1,2 +1,3 @@
 <sax.ml>: rectypes
 <sax_ns.ml>: rectypes
+<tests/*.{ml,byte,native}>: use_conversion
