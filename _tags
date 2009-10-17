@@ -1,3 +1,6 @@
-<sax.ml>: rectypes
-<sax_ns.ml>: rectypes
+"pa_unicode.ml": use_camlp4, camlp4of
+"xmlchar.ml": use_unicode.syntax
+"xmlparser.ml": use_unicode.syntax
+"sax.ml": rectypes
+"sax_ns.ml": rectypes
 <tests/*.{ml,byte,native}>: use_conversion

@@ -2,39 +2,6 @@
  * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
  *)
 
-let of_char = Char.code
-
-let u_lt = of_char '<'
-let u_gt = of_char '>'
-let u_slash = of_char '/'
-let u_excl = of_char '!'
-let u_quest = of_char '?'
-let u_amp = of_char '&'
-let u_dash = of_char '-'
-let u_openbr = of_char '['
-let u_closebr = of_char ']'
-let u_dot = of_char '.'
-let u_colon = of_char ':'
-let u_semicolon = of_char ';'
-let u_underline = of_char '_'
-let u_eq = of_char '='
-let u_quot = of_char '"'
-let u_apos = of_char '\''
-let u_lf = of_char '\n'
-let u_cr = of_char '\r'
-let u_tab = of_char '\t'
-let u_percent = of_char '%'
-let u_openparen = of_char '('
-let u_closeparen = of_char ')'
-let u_sharp = of_char '#'
-let u_pipe = of_char '|'
-let u_star = of_char '*'
-let u_0 = of_char '0'
-let u_9 = of_char '9'
-let u_plus = of_char '+'
-let u_comma = of_char ','
-
-
 (*
  * [2] Char    ::=    #x9 | #xA | #xD |  /* any Unicode character,
  *                    [#x20-#xD7FF] |    excluding the surrogate blocks,
@@ -50,12 +17,12 @@ let is_xmlchar = function
   | u when u >= 0x10000 && u <= 0x10FFFF -> true
   | _ -> false
 
-module U =
+module UChar =
 struct
   type t = int
   let compare = compare
 end
-module XMLCharSet = Set.Make(U)
+module XMLCharSet = Set.Make(UChar)
   
 let of_lists list =
   List.fold_left (fun set (l, r) ->
@@ -180,19 +147,19 @@ let letter =
  * [5] Name      ::= (Letter | '_' | ':') (NameChar)*
  *)
 let is_first_ncnamechar uchar =
-  XMLCharSet.mem uchar letter || uchar = u_underline
+  XMLCharSet.mem uchar letter || uchar = U'_'
   
 let is_ncnamechar uchar =
   XMLCharSet.mem uchar letter || XMLCharSet.mem uchar digit ||
-    uchar = u_dot || uchar = u_dash || 
-  uchar = u_underline || XMLCharSet.mem uchar combiningchar || 
+    uchar = '.' || uchar = '-' || 
+  uchar = '_' || XMLCharSet.mem uchar combiningchar || 
   XMLCharSet.mem uchar extender
   
 let is_first_namechar uchar =
-  is_first_ncnamechar uchar || uchar = u_colon
+  is_first_ncnamechar uchar || uchar = ':'
   
 let is_namechar uchar =
-  uchar = u_colon || is_ncnamechar uchar
+  uchar = ':' || is_ncnamechar uchar
   
 (*
  * [3] S         ::= (#x20 | #x9 | #xD | #xA)+
@@ -207,7 +174,7 @@ let is_space = function
  *)
 let is_pubid_char ucs4 =
   if ucs4 < 0xFF then
-    match Char.chr ucs4 with
+    match ucs4 with
       | ' ' | '\n' | '\r'
       | 'a'..'z'
       | 'A'..'Z'
