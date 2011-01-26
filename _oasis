@@ -1,0 +1,32 @@
+OASISFormat: 0.2
+Name:        xml
+Version:     0.1
+Authors:     Anastasia Gornostaeva
+Copyrights:  (C) 2004 Anastasia Gornostaeva
+License:     BSD3
+LicenseFile: LICENCE
+Plugins:     DevFiles (0.2), META (0.2)
+BuildTools:  ocamlbuild
+
+Synopsis:    Xml parser for discrete data
+Description:
+  TODO
+
+Library xml
+  Path:       .
+  Modules:    Xml, Xmlparser, Light_xml, Dom, Sax, Sax_ns
+  InternalModules: Xmlencoding, Xmlchar, Xml_encode, Xml_decode
+
+Document api
+  Title:      API reference
+  InstallDir: $docdir
+  Type: ocamlbuild (0.2)
+  BuildTools: ocamldoc
+  XOcamlbuildPath: .
+  XOcamlbuildLibraries: xml
+
+SourceRepository github
+  Type:     git
+  Location: git://github.com/ermine/xml.git
+  Browser:  https://github.com/ermine/xml
+

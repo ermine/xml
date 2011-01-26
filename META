@@ -1,0 +1,9 @@
+# OASIS_START
+# DO NOT EDIT (digest: 94abb3b9787673886db8c8250191c3c5)
+version = "0.1"
+description = "Xml parser for discrete data"
+archive(byte) = "xml.cma"
+archive(native) = "xml.cmxa"
+exists_if = "xml.cma"
+# OASIS_STOP
+

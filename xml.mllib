@@ -1,10 +1,13 @@
-Xmlencoding
-Xmlchar
-Xml_encode
-Xml_decode
-Xmlparser
+# OASIS_START
+# DO NOT EDIT (digest: 3ca939d7856488300b7bcb9d9f9177e6)
 Xml
+Xmlparser
 Light_xml
 Dom
 Sax
 Sax_ns
+Xmlencoding
+Xmlchar
+Xml_encode
+Xml_decode
+# OASIS_STOP
