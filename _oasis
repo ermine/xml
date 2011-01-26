@@ -14,8 +14,8 @@ Description:
 
 Library xml
   Path:       .
-  Modules:    Xml, Xmlparser, Light_xml, Dom, Sax, Sax_ns
-  InternalModules: Xmlencoding, Xmlchar, Xml_encode, Xml_decode
+  Modules:    Xml, Xmlencoding, Xmlparser, Light_xml, Dom, Sax, Sax_ns
+  InternalModules: Xml_encode, Xmlchar, Xml_decode
 
 Document api
   Title:      API reference
