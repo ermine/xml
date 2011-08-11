@@ -12,10 +12,22 @@ Synopsis:    Xml parser for discrete data
 Description:
   TODO
 
+Flag tests
+  Description: Compile tests
+  Default: false
+
+
 Library xml
   Path:       .
   Modules:    Xml, Xmlencoding, Xmlparser, Light_xml, Dom, Sax, Sax_ns
   InternalModules: Xml_encode, Xmlchar, Xml_decode
+
+Executable test2
+  Path:       tests
+  Install:    false
+  Build$:     flag(tests)
+  MainIs:     test2.ml
+  BuildDepends: xml, text
 
 Document api
   Title:      API reference

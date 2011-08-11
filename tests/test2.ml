@@ -34,14 +34,13 @@ let pi_handler target data =
   printf "Pi %s %s\n" target data
     
 let unknown_encoding_handler encoding =
-  let decoder = Conversion.make_decoder encoding in
+  let decoder = Encoding.decoder encoding in
     fun str i ->
-      match decoder str i with
-        | Cs.Shift j -> Xmlencoding.Shift j
-        | Cs.Invalid -> Xmlencoding.Invalid
-        | Cs.TooFew -> Xmlencoding.TooFew
-        | Cs.Result (j, ucs4) -> Xmlencoding.Result (j, ucs4)
-    
+      match Encoding.decode decoder str i (String.length str - i) with
+        | Encoding.Dec_ok (ucs4, j) -> Xmlencoding.Result ((i+j), ucs4)
+        | Encoding.Dec_need_more -> Xmlencoding.TooFew
+        | Encoding.Dec_error -> Xmlencoding.Invalid
+  
 let entity_resolver entity =
   failwith (sprintf "Unknown entity: %s" entity)
     
