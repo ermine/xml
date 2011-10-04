@@ -1,5 +1,5 @@
 OASISFormat: 0.2
-Name:        xml
+Name:        erm_xml
 Version:     0.1
 Authors:     Anastasia Gornostaeva
 Copyrights:  (C) 2004 Anastasia Gornostaeva
@@ -17,7 +17,7 @@ Flag tests
   Default: false
 
 
-Library xml
+Library erm_xml
   Path:       .
   Modules:    Xml, Xmlencoding, Xmlparser, Light_xml, Dom, Sax, Sax_ns
   InternalModules: Xml_encode, Xmlchar, Xml_decode
@@ -27,7 +27,7 @@ Executable test2
   Install:    false
   Build$:     flag(tests)
   MainIs:     test2.ml
-  BuildDepends: xml, text
+  BuildDepends: erm_xml, text
 
 Document api
   Title:      API reference
@@ -35,7 +35,7 @@ Document api
   Type: ocamlbuild (0.2)
   BuildTools: ocamldoc
   XOcamlbuildPath: .
-  XOcamlbuildLibraries: xml
+  XOcamlbuildLibraries: erm_xml
 
 SourceRepository github
   Type:     git

@@ -1,10 +1,10 @@
 # OASIS_START
-# DO NOT EDIT (digest: 3cc413dd886c9cfc203282060e16e6fc)
-# Library xml
+# DO NOT EDIT (digest: da192d0ee05e9de383e300ed3ce34bcc)
+# Library erm_xml
 # Executable test2
-"tests/test2.byte": use_xml
+"tests/test2.byte": use_erm_xml
 "tests/test2.byte": pkg_text
-<tests/*.ml{,i}>: use_xml
+<tests/*.ml{,i}>: use_erm_xml
 <tests/*.ml{,i}>: pkg_text
 # OASIS_STOP
 <sax.ml>: rectypes
