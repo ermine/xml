@@ -896,7 +896,13 @@ let parse_attdefs nextf attname state ucs4 =
       parse_attvalue (fun value -> nextf (name, atttype, `Default value))
         state ucs4
   in
-    get_attdefs [] state ucs4
+    if Xmlchar.is_space ucs4 then
+      Lexer (skip_blank (get_attdefs []))
+    else if Xmlchar.u_gt = ucs4 then
+      nextf (`AttlistDecl (attname, []))
+    else
+      raise (LexerError "unexpected char")
+        
 
 (*
  * [52] AttlistDecl   ::= '<!ATTLIST' S Name AttDef* S? '>'

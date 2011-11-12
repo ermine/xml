@@ -241,8 +241,3 @@ let process_production (state, tag) =
 let parse_document ?unknown_encoding_handler ?entity_resolver buf =
   let p = Xmlparser.create ?unknown_encoding_handler ?entity_resolver () in
     process_production (Xmlparser.parse ~buf ~finish:true p)
-      
-let parse_document ?unknown_encoding_handler ?entity_resolver buf =
-  let p = Xmlparser.create ?unknown_encoding_handler ?entity_resolver () in
-    process_production (Xmlparser.parse ~buf ~finish:true p)
-      
