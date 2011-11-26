@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009 Anastasia Gornostaeva
  * 
  * http://www.w3.org/TR/xml (fourth edition)
  * http://www.w3.org/TR/REC-xml-names

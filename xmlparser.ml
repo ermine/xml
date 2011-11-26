@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009 Anastasia Gornostaeva
  *)
 
 open Xmlencoding

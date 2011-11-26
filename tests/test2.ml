@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2008 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2008 Anastasia Gornostaeva
  *)
 
 open Printf
@@ -46,6 +46,11 @@ let entity_resolver entity =
     
 let _ =
   let fin = open_in Sys.argv.(1) in
+  let len =
+    if Array.length Sys.argv > 2 then
+      int_of_string Sys.argv.(2)
+    else
+      100 in
   let state = Sax_ns.create
     ~start_ns_handler
     ~end_ns_handler
@@ -58,9 +63,9 @@ let _ =
     ~entity_resolver
     ~whitespace_preserve:true () in
     
-  let buf = String.create 1024 in
+  let buf = String.create len in
   let rec loop state =
-    let size = input fin buf 0 70 in
+    let size = input fin buf 0 len in
       if size = 0 then (
         close_in fin;
         ignore (Sax_ns.parse ~finish:true state)

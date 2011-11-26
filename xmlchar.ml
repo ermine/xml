@@ -1,5 +1,5 @@
 '0'(*
- * (c) 2007-2009 Anastasia Gornostaeva <ermine@ermine.pp.ru>
+ * (c) 2007-2009 Anastasia Gornostaeva
  *)
 
 let of_char = Char.code
