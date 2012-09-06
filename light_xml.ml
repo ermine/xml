@@ -1,5 +1,5 @@
 (*
- * (c) 2004-2009 Anastasia Gornostaeva
+ * (c) 2004-2012 Anastasia Gornostaeva
  *)
 
 type element =
@@ -169,75 +169,4 @@ let get_by_xmlns xml ?path ?tag xmlns =
 		             if safe_get_attr_s x "xmlns" = xmlns then true
 		             else false) els
       
-let process_production (state, tag) =
-  let rec process_prolog (state, tag) =
-    match tag with
-      | Xmlparser.Comment _
-      | Xmlparser.Doctype _
-      | Xmlparser.Pi _
-      | Xmlparser.Whitespace _ ->
-          process_prolog (Xmlparser.parse state)
-      | Xmlparser.StartElement (name, attrs) ->
-          let nextf childs (state, tag) =
-            let el = Xmlelement (name, attrs, childs) in
-              process_epilogue el (state, tag)
-          in
-            get_childs name nextf [] (Xmlparser.parse state)
-      | Xmlparser.EndOfBuffer ->
-          failwith "End of Buffer"
-      | Xmlparser.EndOfData ->
-          raise End_of_file
-      | Xmlparser.EndElement _
-      | Xmlparser.Text _ ->
-          failwith "Unexpected tag"
-            
-  and get_childs name nextf childs (state, tag) =
-    match tag with
-      | Xmlparser.Whitespace str ->
-          get_childs name nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
-      | Xmlparser.Text str ->
-          get_childs name nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
-      | Xmlparser.StartElement (name', attrs) ->
-          let newnextf childs' (state, tag) =
-            let child = 
-              Xmlelement (name', attrs, childs') in
-              get_childs name nextf (child :: childs) (state, tag)
-          in
-            get_childs name' newnextf [] (Xmlparser.parse state)
-      | Xmlparser.EndElement name' ->
-          if name = name' then
-            nextf (List.rev childs) (Xmlparser.parse state)
-          else 
-            failwith (Printf.sprintf "Bad end tag: expected %s, was %s"
-                        name name')
-      | Xmlparser.Comment _
-      | Xmlparser.Pi _ ->
-          get_childs name nextf childs (Xmlparser.parse state)
-      | Xmlparser.Doctype _dtd ->
-          failwith "Doctype declaration inside of element"
-      | Xmlparser.EndOfBuffer ->
-          failwith "End of Buffer"
-      | Xmlparser.EndOfData ->
-          raise End_of_file
-            
-  and process_epilogue el (state, tag) =
-    match tag with
-      | Xmlparser.Comment _
-      | Xmlparser.Pi _
-      | Xmlparser.Whitespace _ ->
-          process_epilogue el (Xmlparser.parse state)
-      | Xmlparser.EndOfBuffer ->
-          failwith "End Of Buffer"
-      | Xmlparser.EndOfData ->
-          el
-      | Xmlparser.Text _
-      | Xmlparser.Doctype _
-      | Xmlparser.StartElement _
-      | Xmlparser.EndElement _ ->
-          failwith "Invalid epilogue"
-  in
-    process_prolog (state, tag)
-      
-let parse_document ?unknown_encoding_handler ?entity_resolver buf =
-  let p = Xmlparser.create ?unknown_encoding_handler ?entity_resolver () in
-    process_production (Xmlparser.parse ~buf ~finish:true p)
+let parse_document = Xml.parse_document

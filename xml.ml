@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2009 Anastasia Gornostaeva
+ * (c) 2007-2012 Anastasia Gornostaeva
  * 
  * http://www.w3.org/TR/xml (fourth edition)
  * http://www.w3.org/TR/REC-xml-names
@@ -23,7 +23,7 @@ type cdata = string
 type attribute = qname * cdata
 
 type element = 
-  | Xmlelement of qname * attribute list * element list
+  | Xmlelement of (qname * attribute list * element list)
   | Xmlcdata of cdata
 
 let ns_xml = Some "http://www.w3.org/XML/1998/namespace"
@@ -310,85 +310,82 @@ let string_of_tag (ns, name) =
   in
     Printf.sprintf "(%S) %s" prefix name
       
-let process_production (state, tag) =
+
+module XmlParser = Xmllexer.M
+module XStanza = Xmllexer.XmlStanza
+open XStanza
+      
+let parse_document strm =
+  let next_token = XmlParser.make_lexer strm in
   let namespaces = Hashtbl.create 1 in
   let () = Hashtbl.add namespaces "xml" ns_xml in
-    
-  let rec process_prolog (state, tag) =
-    match tag with
-      | Xmlparser.Comment _
-      | Xmlparser.Doctype _
-      | Xmlparser.Pi _
-      | Xmlparser.Whitespace _ ->
-          process_prolog (Xmlparser.parse state)
-      | Xmlparser.StartElement (name, attrs) ->
-          let qname, lnss, attrs = parse_element_head namespaces name attrs in
-          let nextf childs (state, tag) =
-            let el = Xmlelement (qname, attrs, childs) in
-              remove_namespaces namespaces lnss;
-              process_epilogue el (state, tag)
-          in
-            get_childs qname nextf [] (Xmlparser.parse state)
-      | Xmlparser.EndOfBuffer ->
-          failwith "End of Buffer"
-      | Xmlparser.EndOfData ->
-          raise End_of_file
-      | Xmlparser.Text _
-      | Xmlparser.EndElement _ ->
-          failwith "Unexpected tag"
-            
-  and get_childs qname nextf childs (state, tag) =
-    match tag with
-      | Xmlparser.Whitespace str ->
-          get_childs qname nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
-      | Xmlparser.Text str ->
-          get_childs qname nextf (Xmlcdata str :: childs) (Xmlparser.parse state)
-      | Xmlparser.StartElement (name, attrs) ->
-          let qname', lnss, attrs = parse_element_head namespaces name attrs in
-          let newnextf childs' (state, tag) =
-            let child = 
-              Xmlelement (qname', attrs, childs') in
-              remove_namespaces namespaces lnss;
-              get_childs qname nextf (child :: childs) (state, tag)
-          in
-            get_childs qname' newnextf [] (Xmlparser.parse state)
-      | Xmlparser.EndElement name ->
-          let qname' = parse_qname namespaces (split_name name) in
-            if qname = qname' then
-              nextf (List.rev childs) (Xmlparser.parse state)
-            else 
-              failwith (Printf.sprintf "Bad end tag: expected %s, was %s"
-                          (string_of_tag qname)
-                          (string_of_tag qname'))
-      | Xmlparser.Comment _
-      | Xmlparser.Pi _ ->
-          get_childs qname nextf childs (Xmlparser.parse state)
-      | Xmlparser.Doctype _dtd ->
-          failwith "Doctype declaration inside of element"
-      | Xmlparser.EndOfBuffer ->
-          failwith "End of Buffer"
-      | Xmlparser.EndOfData ->
-          raise End_of_file
-            
-  and process_epilogue el (state, tag) =
-    match tag with
-      | Xmlparser.Comment _
-      | Xmlparser.Pi _
-      | Xmlparser.Whitespace _ ->
-          process_epilogue el (Xmlparser.parse state)
-      | Xmlparser.EndOfBuffer ->
-          failwith "End Of Buffer"
-      | Xmlparser.EndOfData ->
-          el
-      | Xmlparser.Text _
-      | Xmlparser.Doctype _
-      | Xmlparser.StartElement _
-      | Xmlparser.EndElement _ ->
-          failwith "Invalid epilogue"
+  let stack = Stack.create () in
+  let add_element el =
+    let (qname, attrs, subels) = Stack.pop stack in
+      Stack.push (qname, attrs, (el :: subels)) stack
   in
-    process_prolog (state, tag)
+  let rec loop () =
+    match next_token () with
+      | Some t -> (
+        match t with
+          | StartTag (name, attrs, selfclosing) ->
+            let qname, lnss, attrs = parse_element_head namespaces name attrs in
+            let el = (qname, attrs, []) in
+              if selfclosing then (
+                remove_namespaces namespaces lnss;
+                if Stack.is_empty stack then (
+                  Stack.push el stack;
+                  loop ();
+                ) else (
+                  add_element (Xmlelement el);
+                  remove_namespaces namespaces lnss;
+                  loop ()
+                )
+              ) else (
+                Stack.push el stack;
+                loop ();
+                remove_namespaces namespaces lnss;
+                loop ()
+              )
+          | EndTag _name ->
+            (* let qname = parse_qname namespaces (split_name name) in *)
+            if Stack.length stack > 1 then 
+              add_element (Xmlelement (Stack.pop stack))
+            else
+              ()
+          | Text text ->
+            add_element (Xmlcdata text);
+            loop ()
+          | Doctype _              
+          | PI _ ->
+            loop ()
+      )
+      | None -> ()
+  in
+    try
+      loop ();
+      let el = Stack.pop stack in
+        Xmlelement el
+    with XmlParser.Located_exn ((line, col), exn) ->
+      match exn with
+        | XmlParser.Error msg ->
+          Printf.eprintf "%d:%d %s\n" line col msg;
+          Pervasives.exit 127
+        | XmlParser.Error_ExpectedChar chs ->
+          Printf.eprintf "%d:%d Expected '%s'\n" line col
+            (String.make 1 (List.hd chs));
+          Pervasives.exit 127          
+        | XmlParser.Error_CharToken u ->
+          let chs = XmlParser.S.encode_unicode u in
+          let str = String.create (List.length chs) in
+          let rec iteri i = function
+            | [] -> ()
+            | x :: xs -> str.[i] <- x; iteri (succ i) xs
+          in
+            iteri 0 chs;
+            Printf.eprintf "%d:%d Unexpected character token %S\n" line col str;
+            Pervasives.exit 127
+        | exn ->
+          Printf.eprintf "%d:%d %s\n" line col (Printexc.to_string exn);
+          Pervasives.exit 127
 
-let parse_document ?unknown_encoding_handler ?entity_resolver buf =
-  let p = Xmlparser.create ?unknown_encoding_handler ?entity_resolver () in
-    process_production (Xmlparser.parse ~buf ~finish:true p)
-      

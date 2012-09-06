@@ -1,8 +1,8 @@
 # OASIS_START
-# DO NOT EDIT (digest: e37a3e07df05e14908fe2e8d620ae24a)
+# DO NOT EDIT (digest: e0d6895d3c6996b45b3a83248fef5581)
 Xml
-Xmlencoding
-Xmlparser
+Xmllexer_generic
+Xmllexer
 Light_xml
 Dom
 Sax

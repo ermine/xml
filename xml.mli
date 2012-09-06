@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2009 Anastasia Gornostaeva
+ * (c) 2007-2012 Anastasia Gornostaeva
  *)
 
 exception NonXmlelement
@@ -14,7 +14,7 @@ type cdata = string
 type attribute = qname * cdata
 
 type element =
-    Xmlelement of qname * attribute list * element list
+    Xmlelement of (qname * attribute list * element list)
   | Xmlcdata of cdata
 
 val ns_xml : namespace
@@ -91,8 +91,6 @@ val parse_element_head :
   qname * (namespace * prefix) list * attribute list
 val string_of_tag : qname -> string
 
-val parse_document :
-  ?unknown_encoding_handler:(string -> (string -> int -> Xmlencoding.t)) ->
-  ?entity_resolver:(string -> string) -> string -> element
+val parse_document : char Stream.t -> element
 
   

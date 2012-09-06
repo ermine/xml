@@ -1,6 +1,8 @@
 (*
- * (c) 2007-2009 Anastasia Gornostaeva
+ * (c) 2007-2012 Anastasia Gornostaeva
  *)
+
+let _ = Printexc.record_backtrace true
 
 open Xml
 
@@ -18,22 +20,7 @@ let print_result xml =
     Buffer.output_buffer stdout buf
       
 let _ =
-  let file = Sys.argv.(1) in
-  let f_in = open_in file in
-  let buf = Buffer.create 8126 in
-  let str = String.create 1024 in
-  let rec read_file () =
-    let size = input f_in str 0 1024 in
-      if size = 0 then (
-        close_in f_in;
-        Buffer.contents buf
-      )
-      else (
-        Buffer.add_string buf (String.sub str 0 size);
-        read_file ()
-      )
-  in
-  let data = read_file () in
-  let doc = parse_document data in
+  let strm = Stream.of_channel (open_in Sys.argv.(1)) in
+  let doc = parse_document strm in
     print_result doc
     

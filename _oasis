@@ -1,8 +1,8 @@
-OASISFormat: 0.2
+OASISFormat: 0.3
 Name:        erm_xml
-Version:     0.1
+Version:     0.2
 Authors:     Anastasia Gornostaeva
-Copyrights:  (C) 2004 Anastasia Gornostaeva
+Copyrights:  (C) 2007-2012 Anastasia Gornostaeva
 License:     BSD3
 LicenseFile: LICENCE
 Plugins:     DevFiles (0.2), META (0.2)
@@ -12,30 +12,22 @@ Synopsis:    Xml parser for discrete data
 Description:
   TODO
 
-Flag tests
+Flag testing
   Description: Compile tests
   Default: false
 
 
 Library erm_xml
   Path:       .
-  Modules:    Xml, Xmlencoding, Xmlparser, Light_xml, Dom, Sax, Sax_ns
-  InternalModules: Xml_encode, Xmlchar, Xml_decode
+  Modules:    Xml, Xmllexer_generic, Xmllexer, Light_xml
+  InternalModules: Xml_encode, Xml_decode
 
 Executable test2
   Path:       tests
   Install:    false
-  Build$:     flag(tests)
+  Build$:     flag(testing)
   MainIs:     test2.ml
   BuildDepends: erm_xml, text
-
-Document api
-  Title:      API reference
-  InstallDir: $docdir
-  Type: ocamlbuild (0.2)
-  BuildTools: ocamldoc
-  XOcamlbuildPath: .
-  XOcamlbuildLibraries: erm_xml
 
 SourceRepository github
   Type:     git

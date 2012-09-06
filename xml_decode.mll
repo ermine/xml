@@ -1,5 +1,5 @@
 (*
- * (c) 2004-2009 Anastasia Gornostaeva
+ * (c) 2004-2012 Anastasia Gornostaeva
  *)
 
 {
