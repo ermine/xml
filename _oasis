@@ -22,11 +22,18 @@ Library erm_xml
   Modules:    Xml, Xmllexer_generic, Xmllexer, Light_xml
   InternalModules: Xml_encode, Xml_decode
 
-Executable test2
+Executable test1
   Path:       tests
   Install:    false
   Build$:     flag(testing)
-  MainIs:     test2.ml
+  MainIs:     test1.ml
+  BuildDepends: erm_xml, text
+
+Executable light_test
+  Path:       tests
+  Install:    false
+  Build$:     flag(testing)
+  MainIs:     light_test.ml
   BuildDepends: erm_xml, text
 
 SourceRepository github
