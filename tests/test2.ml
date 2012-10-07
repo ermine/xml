@@ -4,8 +4,11 @@
 
 module StringStream =
 struct
-  type 'a t = 'a Xmllexer.UnitMonad.t
-  type orig_stream = {
+  type 'a t = 'a
+  let return x = x
+  let fail = raise
+    
+  type stream = {
     mutable i : int;
     len : int;
     buf : string
@@ -14,45 +17,35 @@ struct
   let of_string str =
     { buf = str; len = String.length str; i = 0}
 
-  let peek s =
-    if s.i < s.len then
-      Some s.buf.[s.i]
+  let get s =
+    if s.i < s.len then (
+      let c = s.buf.[s.i] in
+        s.i <- s.i + 1;
+        Some c
+    )
     else
       None
-    
-  let junk s =
-    if s.i < s.len then s.i <- s.i + 1
-end
-
-module IconvEncoding =
-struct
-  open StringStream
-  type orig_stream = StringStream.orig_stream
-  type 'a t = 'a Xmllexer.UnitMonad.t
-
-  module E = Xmllexer.Encoding(Xmllexer.UnitMonad) (StringStream)
-  open Xmllexer.UnitMonad
-
-  let encode_unicode = E.encode_unicode
-  let decode_utf8 = E.decode_utf8
 
   open Encoding
-
+  exception IllegalCharacter
+    
   let make_decoder encname =
     let decoder = decoder encname in
       fun strm ->
-        match decode decoder strm.buf strm.i (strm.len - strm.i) with
-          | Dec_ok (ucs4, j) ->
-            strm.i <- strm.i+j;
-            return (Some ucs4)
-          | Dec_need_more -> fail E.IllegalCharacter
-          | Dec_error -> fail E.IllegalCharacter
-    
+        if strm.i < strm.len then
+          match decode decoder strm.buf strm.i (strm.len - strm.i) with
+            | Dec_ok (ucs4, j) ->
+              strm.i <- strm.i + j;
+              return (Some ucs4)
+            | Dec_need_more -> fail IllegalCharacter
+            | Dec_error -> fail IllegalCharacter
+        else
+          return None
 end
 
-module XmlStanza (M : Xmllexer_generic.Monadable) =
+module XStanza =
 struct
-  type 'a t = 'a M.t
+  type 'a t = 'a
 
   type token = unit
 
@@ -81,11 +74,10 @@ end
 
 open Xmllexer
 
-module M = Xmllexer_generic.Make (Xmllexer_generic.XName)
-  (UnitMonad)
-  (LikeLWT (UnitMonad) (StringStream))
-  (IconvEncoding)
-  (XmlStanza (UnitMonad))
+module M = Xmllexer_generic.Make
+  (LocatedStream (UnitMonad) (StringStream))
+  (Encoding)
+  (XStanza)
 
 let _ =
   let f = open_in Sys.argv.(1) in
@@ -97,5 +89,8 @@ let _ =
   in
   let content = read_file () in
   let strm = StringStream.of_string content in
+  let strm = M.S.make_stream strm in
   let next_token = M.make_lexer strm in
-  let rec loop () = next_token (); loop () in loop ()
+  let rec loop () = next_token (); loop () in
+  let _ = loop () in
+    ()

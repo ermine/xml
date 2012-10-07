@@ -2,25 +2,29 @@
  * (c) 2007-2012 Anastasia Gornostaeva
  *)
 
-module type STREAM =
+module type MONAD =
 sig
   type 'a t
   val return : 'a -> 'a t
-  val fail : exn -> 'a t
   val (>>=) : 'a t -> ('a -> 'b t) -> 'b t
-  val catch : (unit -> 'b t) -> (exn -> 'b t) -> 'b t
+  val fail : exn -> 'a t
+end
 
-  exception Located_exn of (int * int) * exn
-
-  type stream
-  type orig_stream
-  val make_stream : orig_stream -> stream
-  val next_char : stream -> (unit -> 'b t) -> (int -> 'b t) -> 'b t
-  val fail_located : stream -> exn -> 'b t
-
+module type ENCODING =
+sig
   val encode_unicode : int -> char list
-  val xml_decl : version:string -> ?encoding:string -> ?standalone:string ->
-    stream -> unit t
+end
+
+module type STREAM =
+sig
+  include MONAD
+  type stream
+  type source
+
+  val make_stream : source -> stream
+  val set_decoder : string -> stream -> unit
+  val next_char : stream -> (unit -> 'b t) -> (int -> 'b t) -> 'b t
+  val error : stream -> exn -> 'a t
 end
 
 type external_id =
@@ -186,12 +190,15 @@ struct
     char_range u 0x203F 0x2040
 end
   
-module Make (XName : XNAME) (S : STREAM) (X : XMLTOKEN with type 'a t = 'a S.t) =
+module Make
+  (S : STREAM)
+  (E : ENCODING)
+  (X : XMLTOKEN with type 'a t = 'a S.t) =
 struct
+  module E = E
   module S = S
+  module X = X
   open S
-
-  exception Located_exn = S.Located_exn
 
   type next_state =
     | PrologXmlDeclState
@@ -206,15 +213,15 @@ struct
     mutable next_state : next_state
   }
 
-  exception Error of string
-  exception Error_EOF
-  exception Error_ExpectedChar of char list
-  exception Error_ExpectedSpace
-  exception Error_CharToken of int
+  exception Exn_msg of string
+  exception Exn_EOF
+  exception Exn_ExpectedChar of char list
+  exception Exn_ExpectedSpace
+  exception Exn_CharToken of int
   exception Error_XMLDecl
 
   let not_eof () =
-    fail Error_EOF
+    S.fail Exn_EOF
 
   let rec add_chars state = function
     | [] -> ()
@@ -226,21 +233,21 @@ struct
       value
 
   let rec consume_sequence strm = function
-    | [] -> return ()
+    | [] -> S.return ()
     | x :: xs ->
       next_char strm not_eof (fun u ->
         if u = x then (
           consume_sequence strm xs
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
         
   and consume_space strm =
     next_char strm not_eof (fun u ->
       if is_space u then
-        return ()
+        S.return ()
       else
-        fail_located strm (Error_ExpectedSpace)
+        error strm Exn_ExpectedSpace
     )
 
   let parse_xmldecl data =
@@ -393,10 +400,10 @@ struct
 
   let character_reference strm =
     let rec aux_entity u = function
-      | N [] -> fail_located strm (Error_CharToken u)
+      | N [] -> error strm (Exn_CharToken u)
       | N ((c, L z) :: rest) ->
         if u = c then
-          return u
+          S.return u
         else
           aux_entity u (N rest)
       | N ((c, t) :: rest) ->
@@ -407,7 +414,7 @@ struct
            else
              aux_entity u (N rest)
       | L c ->
-        return u
+        S.return u
     in
       next_char strm not_eof (fun u ->
         if u = u_sharp then (
@@ -424,11 +431,11 @@ struct
                   else if u = u_semicolon then
                     if consumed then
                       (* test unicode char *)
-                      return acc
+                      S.return acc
                     else
-                      fail_located strm (Error "Expected hex")
+                      error strm (Exn_msg "Expected hex")
                   else
-                    fail_located strm (Error_CharToken u)
+                    error strm (Exn_CharToken u)
                 )
               in
                 get_hex_code false 0
@@ -441,16 +448,16 @@ struct
                   else if u = u_semicolon then
                     if consumed then
                       (* test unicode char *)
-                      return acc
+                      S.return acc
                     else
-                      fail_located strm (Error_CharToken u)
+                      error strm (Exn_CharToken u)
                   else
-                    fail_located strm (Error_CharToken u)
+                    error strm (Exn_CharToken u)
                 )
               in
                 get_code false (u - 0x0030)
             else 
-              fail_located strm (Error_CharToken u)
+              error strm (Exn_CharToken u)
           )
         ) else
           aux_entity u entities
@@ -464,10 +471,10 @@ struct
           X.emit_text txt
       else if u = u_amp then
         character_reference strm >>= fun u ->
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           text_state state strm
       else (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         text_state state strm
       )
     )
@@ -495,9 +502,9 @@ struct
       next_char strm not_eof (fun u ->
         if u = u_gt then
           (* end of comment *)
-          return ()
+          S.return ()
         else
-          fail_located strm (Error "Unexpected '--'")
+          error strm (Exn_msg "Unexpected '--'")
       )
 
     in
@@ -518,10 +525,10 @@ struct
           state.next_state <- TextState;
           X.emit_start_tag tagname [] false
       ) else if XName.is_name_char u then (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         start_tag_name_state state strm
       ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
     )
   and self_closing_start_tag_state tagname state strm =
     next_char strm not_eof (fun u ->
@@ -532,15 +539,15 @@ struct
           state.next_state <- TextState;
         X.emit_start_tag tagname [] true
       ) else
-        fail_located strm (Error_CharToken u)
+        error strm (Exn_CharToken u)
     )
   and end_tag_start_state state strm =
     next_char strm not_eof (fun u ->
       if XName.is_name_start_char u then (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         end_tag_state state strm
       ) else
-        fail_located strm (Error_CharToken u)
+        error strm (Exn_CharToken u)
     )
 
   and end_tag_state state strm =
@@ -557,12 +564,12 @@ struct
               state.next_state <- TextState;
             X.emit_end_tag tagname
           ) else
-            fail_located strm (Error "Invalid end tag name")
+            error strm (Exn_msg "Invalid end tag name")
       ) else if XName.is_name_char u then (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         end_tag_state state strm
       ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
     )
 
   and after_end_tag_state state strm =
@@ -579,9 +586,9 @@ struct
               state.next_state <- TextState;
             X.emit_end_tag tagname
           ) else
-            fail_located strm (Error "Invalid end tag name")
+            error strm (Exn_msg "Invalid end tag name")
       else
-        fail_located strm (Error_CharToken u)
+        error strm (Exn_CharToken u)
     )
         
   and before_attribute_state tagname attrs state strm =
@@ -597,10 +604,10 @@ struct
         state.next_state <- TextState;
         X.emit_start_tag tagname attrs false
       ) else if XName.is_name_start_char u then (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         attribute_name_state tagname attrs state strm
       ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
     )
 
   and attribute_name_state tagname attrs state strm =
@@ -614,10 +621,10 @@ struct
           after_attribute_name_state state strm >>= fun value ->
         after_attribute_value_state tagname ((name, value) :: attrs) state strm
       ) else if XName.is_name_char u then (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         attribute_name_state tagname attrs state strm
       ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
     )
 
   and after_attribute_name_state state strm =
@@ -627,7 +634,7 @@ struct
       else if u = u_eq then
         before_attribute_value_state state strm
       else
-        fail_located strm (Error_CharToken u)
+        error strm (Exn_CharToken u)
     )
       
   and before_attribute_value_state state strm =
@@ -639,22 +646,22 @@ struct
       else if u = u_apos then
         attribute_value_single_quoted_state state strm
       else
-        fail_located strm (Error_CharToken u)
+        error strm (Exn_CharToken u)
     )
       
   and attribute_value_double_quoted_state state strm =
     next_char strm not_eof (fun u ->
       if u = u_quot then
         let value = extract_buffer state in
-          return value
+          S.return value
       else if u = u_amp then (
         character_reference strm >>= fun u ->
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         attribute_value_double_quoted_state state strm
       ) else if u = u_lt then
-        fail_located strm (Error_CharToken u)
+        error strm (Exn_CharToken u)
         else (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           attribute_value_double_quoted_state state strm
         )
     )
@@ -663,15 +670,15 @@ struct
     next_char strm not_eof (fun u ->
       if u = u_apos then
         let value = extract_buffer state in
-          return value
+          S.return value
       else if u = u_amp then (
         character_reference strm >>= fun u ->
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         attribute_value_single_quoted_state state strm
       ) else if u = u_lt then
-        fail_located strm (Error_CharToken u)
+        error strm (Exn_CharToken u)
         else (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           attribute_value_single_quoted_state state strm
 
         )
@@ -693,17 +700,17 @@ struct
         state.next_state <- TextState;
         X.emit_start_tag tagname attrs false
       ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
     )
           
       
   let rec pi_start_state state strm =
     next_char strm not_eof (fun u ->
       if XName.is_name_start_char u then (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         pi_target_state state strm
       ) else
-        fail_located strm (Error_CharToken u)
+        error strm (Exn_CharToken u)
     )
   and pi_target_state state strm =
     next_char strm not_eof (fun u ->
@@ -713,12 +720,12 @@ struct
       else if u = u_qmark then (
         let target = extract_buffer state in
           consume_sequence strm [u_gt] >>= fun () ->
-        return (target, "")
+        S.return (target, "")
       ) else if XName.is_name_char u then (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         pi_target_state state strm
       ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
     )
   and before_pi_data_state target state strm =
     next_char strm not_eof (fun u ->
@@ -727,7 +734,7 @@ struct
       else if u = u_qmark then
         pi_data_qmark_state target state strm
       else (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         pi_data_state target state strm
       )
     )
@@ -736,7 +743,7 @@ struct
       if u = u_qmark then
         pi_data_qmark_state target state strm
       else (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         pi_data_state target state strm
       )
     )
@@ -744,10 +751,10 @@ struct
     next_char strm not_eof (fun u ->
       if u = u_gt then
         let data = extract_buffer state in
-          return (target, data)
+          S.return (target, data)
       else (
-        add_chars state (encode_unicode u_qmark);
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u_qmark);
+        add_chars state (E.encode_unicode u);
         pi_data_state target state strm
       )
     )
@@ -758,15 +765,15 @@ struct
         if is_space u then
           start state strm
         else if XName.is_name_start_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_name_state state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_name_state state strm =
       next_char strm not_eof (fun u ->
         if XName.is_name_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_name_state state strm
         ) else if is_space u then
             let name = extract_buffer state in
@@ -793,7 +800,7 @@ struct
             } in
               doctype_intsubsect_state doctype state strm
           else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_external_id_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -817,7 +824,7 @@ struct
         ) else if u = u_lbracket then
           doctype_intsubsect_state doctype state strm
           else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_before_systemliteral_state state strm =
       next_char strm not_eof (fun u ->
@@ -826,15 +833,15 @@ struct
         else if u = u_quot || u = u_apos then
           doctype_systemliteral_state u state strm 
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_systemliteral_state lim state strm =
       next_char strm not_eof (fun u ->
         if u = lim then
           let value = extract_buffer state in
-            return value
+            S.return value
         else (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_systemliteral_state lim state strm
         )
       )
@@ -845,7 +852,7 @@ struct
         else if u = u_quot || u = u_apos then
           doctype_publicliteral_state u state strm
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_publicliteral_state lim state strm =
       next_char strm not_eof (fun u ->
@@ -853,7 +860,7 @@ struct
           let value = extract_buffer state in
             consume_space strm >>= fun () ->
           doctype_before_systemliteral_state state strm >>= fun systemid ->
-            return (value, systemid)
+            S.return (value, systemid)
         ) else if u = 0x0020 || u = 0x000D || u = 0x000A ||
                  char_range u 0x0061 0x007A || char_range u 0x0041 0x005A ||
                  char_range u 0x0030 0x0039 ||
@@ -861,11 +868,11 @@ struct
                            u_comma; u_dot; u_slash; u_colon; u_eq; u_qmark;
                            u_semicolon; u_excl; u_star; u_sharp; u_at;
                            u_dollar; u_underline; u_percent] then (
-                   add_chars state (encode_unicode u);
+                   add_chars state (E.encode_unicode u);
                    doctype_publicliteral_state lim state strm
                  )
           else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_before_intsubsect_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -874,7 +881,7 @@ struct
         else if u = u_lbracket then
           doctype_intsubsect_state doctype state strm
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_intsubsect_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -887,7 +894,7 @@ struct
         else if u = u_lt then
           doctype_markupdecl_state doctype state strm
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_intsubsect_end_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -896,15 +903,15 @@ struct
         else if u = u_gt then
           X.emit_doctype doctype
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_pereference_start_state doctype state strm =
       next_char strm not_eof (fun u ->
         if XName.is_name_start_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_pereference_state doctype state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_pereference_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -913,10 +920,10 @@ struct
             doctype_intsubsect_state {doctype with
               dtd = DTD_PEReference name :: doctype.dtd} state strm
         else if XName.is_name_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_pereference_state doctype state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_markupdecl_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -927,7 +934,7 @@ struct
           doctype_intsubsect_state {doctype with
             dtd = DTD_PI (target, data) :: doctype.dtd} state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_markupdecl_excl_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -950,20 +957,20 @@ struct
               consume_space strm >>= fun () ->
               doctype_element_state doctype state strm
             ) else
-                fail_located strm (Error_CharToken u)
+                error strm (Exn_CharToken u)
           )
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_attlist_state doctype state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
           doctype_attlist_state doctype state strm
         else if XName.is_name_start_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_attlist_name_state doctype state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_attlist_name_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -973,23 +980,23 @@ struct
             doctype_intsubsect_state {doctype with
               dtd = DTD_ATTLIST (name, defs) :: doctype.dtd} state strm
         ) else if XName.is_name_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_attlist_name_state doctype state strm
         ) else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_attlist_attdef_state defs state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
           doctype_attlist_attdef_state defs state strm
         else if XName.is_name_start_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_attlist_attdef_name_state state strm >>= fun attdef ->
           doctype_after_attdef_state (attdef :: defs) state strm
         ) else if u = u_gt then
-          return defs
+          S.return defs
           else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_attlist_attdef_name_state state strm =
       next_char strm not_eof (fun u ->
@@ -997,12 +1004,12 @@ struct
           let attrname = extract_buffer state in
             doctype_attlist_atttype_state state strm >>= fun atttype ->
           doctype_attlist_defaultdecl state strm >>= fun defaultdecl ->
-            return (attrname, atttype, defaultdecl)
+            S.return (attrname, atttype, defaultdecl)
         ) else if XName.is_name_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_attlist_attdef_name_state state strm
         ) else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_attlist_atttype_state state strm =
       next_char strm not_eof (fun u ->
@@ -1011,17 +1018,17 @@ struct
         else if u = u_C then (
           consume_sequence strm [u_D; u_A; u_T; u_A] >>= fun () ->
           consume_space strm >>= fun () ->
-          return `CDATA
+          S.return `CDATA
         ) else if u = u_I then (
           consume_sequence strm [u_D] >>= fun () ->
           consume_space strm >>= fun () ->
-          return `ID
+          S.return `ID
         ) else if u = u_N then (
           consume_sequence strm [u_M; u_T; u_O; u_K; u_E; u_N] >>= fun () ->
           consume_space strm >>= fun () ->
-          return `NMTOKEN
+          S.return `NMTOKEN
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_attlist_defaultdecl state strm =
       next_char strm not_eof (fun u ->
@@ -1031,24 +1038,24 @@ struct
           next_char strm not_eof (fun u ->
             if u = u_R then (
               consume_sequence strm [u_E; u_Q; u_U; u_I; u_R; u_E; u_D] >>=
-                fun () -> return `Required
+                fun () -> S.return `Required
             ) else if u = u_I then (
               consume_sequence strm [u_M; u_P; u_L; u_I; u_E; u_D] >>= fun () ->
-              return `Implied
+              S.return `Implied
             ) else
-                fail_located strm (Error_CharToken u)
+                error strm (Exn_CharToken u)
           )
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_after_attdef_state defs state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
             doctype_attlist_attdef_state defs state strm
         else if u = u_gt then
-          return defs
+          S.return defs
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_entity_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -1058,20 +1065,20 @@ struct
           consume_space strm >>= fun () ->
           doctype_entity_pedecl_state doctype state strm
         ) else if XName.is_name_start_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_entity_gedecl_state doctype state strm
         ) else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_entity_pedecl_state doctype state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
           doctype_entity_pedecl_state doctype state strm
         else if XName.is_name_start_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_entity_pedecl_name_state doctype state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_entity_pedecl_name_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -1079,10 +1086,10 @@ struct
           let name = extract_buffer state in
             before_doctype_pedef_state doctype name state strm
         ) else if XName.is_name_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_entity_pedecl_name_state doctype state strm
         ) else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and before_doctype_pedef_state doctype name state strm =
       next_char strm not_eof (fun u ->
@@ -1112,16 +1119,16 @@ struct
                                       (`ExternalID (PublicID (public, system)))))
             :: doctype.dtd} state strm
         ) else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_entityvalue_state lim state strm =
       next_char strm not_eof (fun u ->
         if u = lim then
           let value = extract_buffer state in
-            return value
+            S.return value
         else (
           (* TODO: Pereference, Reference *)
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_entityvalue_state lim state strm
         )
       )
@@ -1131,10 +1138,10 @@ struct
           let name = extract_buffer state in
             doctype_gedecl_entitydef_state doctype name state strm
         else if XName.is_name_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_entity_gedecl_state doctype state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_gedecl_entitydef_state doctype name state strm =
       next_char strm not_eof (fun u ->
@@ -1166,60 +1173,60 @@ struct
                                                    notion))) :: doctype.dtd}
             state strm
         ) else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
     and doctype_gedecl_notion_state state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
           doctype_gedecl_notion_space_state state strm
         else if u = u_gt then
-          return None
+          S.return None
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_gedecl_notion_space_state state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
           doctype_gedecl_notion_space_state state strm
         else if u = u_gt then
-          return None
+          S.return None
         else if u = u_N then (
           consume_sequence strm [u_D; u_A; u_T; u_A] >>= fun () ->
           consume_space strm >>= fun () ->
           doctype_gedecl_notion_before_name_state state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_gedecl_notion_before_name_state state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
           doctype_gedecl_notion_before_name_state state strm
         else if XName.is_name_start_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_gedecl_notion_name state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_gedecl_notion_name state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
           let name = extract_buffer state in
-            return (Some name)
+            S.return (Some name)
         else if XName.is_name_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_gedecl_notion_name state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_element_state doctype state strm =
       next_char strm not_eof (fun u ->
         if is_space u then
           doctype_element_state doctype state strm
         else if XName.is_name_start_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_element_name_state doctype state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_element_name_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -1227,10 +1234,10 @@ struct
           let name = extract_buffer state in
             doctype_element_contentspec_state doctype name state strm
         else if XName.is_name_char u then (
-          add_chars state (encode_unicode u);
+          add_chars state (E.encode_unicode u);
           doctype_element_name_state doctype state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and doctype_element_contentspec_state doctype name state strm =
       next_char strm not_eof (fun u ->
@@ -1246,7 +1253,7 @@ struct
             dtd = DTD_Element (name, `Any) :: doctype.dtd} state strm
         ) else
             (* TODO *)
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
       
     and doctype_markupdecl_end_state doctype state strm =
@@ -1256,7 +1263,7 @@ struct
         else if u = u_gt then
           doctype_intsubsect_state doctype state strm
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
           
     in
@@ -1271,7 +1278,7 @@ struct
           state.next_state <- PrologMiscState;
           start state strm
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
     and prolog_less_than_sign_state state strm =
       next_char strm not_eof (fun u ->
@@ -1279,22 +1286,25 @@ struct
           pi_start_state state strm >>= fun (target, data) ->
           if target = "xml" then
             if state.next_state = PrologXmlDeclState then (
-              let version, encoding, standalone = parse_xmldecl data in
-                S.xml_decl ~version ?encoding ?standalone strm >>= fun () ->
-              state.next_state <- PrologMiscState;
+              let _version, encoding, _standalone = parse_xmldecl data in (
+                match encoding with
+                  | Some encname -> set_decoder encname strm;
+                  | None -> ()
+              );
+                state.next_state <- PrologMiscState;
                 start state strm
             ) else
-              fail_located strm (Error "Illegal PI target")
+              error strm (Exn_msg "Illegal PI target")
           else
             X.emit_pi target data
         ) else if u = u_excl then
             prolog_markup_state state strm
           else if XName.is_name_start_char u then (
             state.next_state <- LessThanSignState;
-            add_chars state (encode_unicode u);
+            add_chars state (E.encode_unicode u);
             start_tag_name_state state strm
           ) else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
 
     and prolog_markup_state state strm =
@@ -1307,7 +1317,7 @@ struct
           consume_space strm >>= fun () ->
           doctype_state state strm
         ) else
-            fail_located strm (Error_CharToken u)
+            error strm (Exn_CharToken u)
       )
         
     in
@@ -1318,7 +1328,7 @@ struct
       if u = u_rbracket then
         cdata_rbracket_state state strm
       else (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         cdata_state state strm
       )
     )
@@ -1327,8 +1337,8 @@ struct
       if u = u_rbracket then
         cdata_rbracket_rbracket_state state strm
       else (
-        add_chars state (encode_unicode u_rbracket);
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u_rbracket);
+        add_chars state (E.encode_unicode u);
         cdata_state state strm
       )
     )
@@ -1339,9 +1349,9 @@ struct
           state.next_state <- TextState;
           X.emit_text txt
       else (
-        add_chars state (encode_unicode u_rbracket);
-        add_chars state (encode_unicode u_rbracket);
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u_rbracket);
+        add_chars state (E.encode_unicode u_rbracket);
+        add_chars state (E.encode_unicode u);
         cdata_state state strm
       )
     )
@@ -1356,7 +1366,7 @@ struct
         comment_state state strm >>= fun () ->
         text_state state strm
       ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
     )
           
       
@@ -1370,11 +1380,11 @@ struct
         pi_start_state state strm >>= fun (target, data) ->
         X.emit_pi target data
       ) else if XName.is_name_start_char u then (
-        add_chars state (encode_unicode u);
+        add_chars state (E.encode_unicode u);
         start_tag_name_state state strm
       )
         else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
     )
       
   let rec after_element_state state strm =
@@ -1391,10 +1401,10 @@ struct
               comment_state state strm >>= fun () ->
                 after_element_state state strm
             ) else
-                fail_located strm (Error_CharToken u)
+                error strm (Exn_CharToken u)
           )
         ) else
-          fail_located strm (Error_CharToken u)
+          error strm (Exn_CharToken u)
       )
 
   let tokenizer state strm =
@@ -1411,8 +1421,7 @@ struct
         prolog_state state strm
         
 
-  let make_lexer ?encoding strm =
-    let strm = S.make_stream strm in
+  let make_lexer strm =
     let state = {
       tmp_buffer = Buffer.create 30;
       stack = Stack.create ();

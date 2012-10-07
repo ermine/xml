@@ -2,21 +2,127 @@
  * (c) 2007-2012 Anastasia Gornostaeva
  *)
 
-module Encoding (S : sig
+open Xmllexer_generic
+
+module type INPUT =
+sig
   type 'a t
   type stream
-  val return : 'a -> 'a t
-  val (>>=) : 'a t -> ('a -> 'b t) -> 'b t
-  val fail : exn -> 'a t
-  val peek : stream -> char option t
-  val junk : stream -> unit t
-    end) =
+  val make_decoder : string -> (stream -> int option t)
+end
+
+module UnitMonad =
 struct
-  open S
+  type 'a t = 'a
+  let return x = x
+  let fail = raise
+  let (>>=) v f = f v
+end
+
+module Decoder (I : sig type 'a t
+                        val (>>=) : 'a t -> ('a -> 'b t) -> 'b t
+                        val return : 'a -> 'a t
+                        val fail : exn -> 'a t
+                        type stream
+                        val get : stream -> char option t end) =
+struct
+  open I
 
   exception IllegalCharacter
+    
+  let decode_utf8 strm =
+    I.get strm >>= function
+      | None -> return None
+      | Some ch1 ->
+        match ch1 with
+          | '\000'..'\127' -> return (Some (Char.code ch1))
+          | '\192'..'\223' -> (
+            I.get strm >>= function
+              | None -> fail IllegalCharacter
+              | Some ch2 ->
+                let n1 = Char.code ch1 in
+                let n2 = Char.code ch2 in
+                  if (n2 lsr 6 != 0b10) then fail IllegalCharacter
+                  else
+                    let code = ((n1 land 0x1f) lsl 6) lor (n2 land 0x3f) in
+                      return (Some (code))
+          )
+          | '\224'..'\239' -> (
+            I.get strm >>= function
+              | None -> fail IllegalCharacter
+              | Some ch2 ->
+                I.get strm >>= function
+                  | None -> fail IllegalCharacter
+                  | Some ch3 ->
+                    let n1 = Char.code ch1
+                    and n2 = Char.code ch2
+                    and n3 = Char.code ch3 in
+                      if (n2 lsr 6 != 0b10) || (n3 lsr 6 != 0b10) then
+                        fail IllegalCharacter
+                      else
+                        let code = 
+                          ((n1 land 0x0f) lsl 12) lor
+                            ((n2 land 0x3f) lsl 6) lor (n3 land 0x3f)
+                        in
+                          if (code >= 0xd800) && (code <= 0xdf00) then
+                            fail IllegalCharacter
+                          else return (Some (code))
+          )
+          | '\240'..'\247' -> (
+            I.get strm >>= function
+              | None -> fail IllegalCharacter
+              | Some ch2 ->
+                I.get strm >>= function
+                  | None -> fail IllegalCharacter
+                  | Some ch3 ->
+                    I.get strm >>= function
+                      | None -> fail IllegalCharacter
+                      | Some ch4 ->
+                        let n1 = Char.code ch1
+                        and n2 = Char.code ch2
+                        and n3 = Char.code ch3
+                        and n4 = Char.code ch4 in
+                          if (n2 lsr 6 != 0b10) ||
+                            (n3 lsr 6 != 0b10) || (n4 lsr 6 != 0b10) then
+                            fail IllegalCharacter
+                          else
+                            return (Some (((n1 land 0x07) lsl 18) lor
+                                             ((n2 land 0x3f) lsl 12) lor
+                                             ((n3 land 0x3f) lsl 6)
+                                          lor (n4 land 0x3f)))
+          )
+          | _ ->
+            fail IllegalCharacter
+end
 
-  let encode_utf8 ucs4 =
+module Input (M : MONAD) =
+struct
+  type 'a t = 'a M.t
+  type stream = char Stream.t
+  let get s =
+    match Stream.peek s with
+      | Some c -> Stream.junk s; M.return (Some c)
+      | None -> M.return None
+
+  module D = Decoder 
+    (struct include M
+            type stream = char Stream.t
+            let get = get end)
+
+  exception UnknownEncoding
+    
+  let make_decoder encname =
+    if encname = "UTF-8" then
+      D.decode_utf8
+    else
+      raise UnknownEncoding
+end
+  
+module Encoding =
+struct
+  exception IllegalCharacter
+
+  let encode_unicode ucs4 =
     let bytes = 
       if ucs4 < 0x80 then
         [ucs4]
@@ -39,131 +145,42 @@ struct
         raise IllegalCharacter
     in
       List.map Char.chr bytes
-        
-  let decode_utf8 strm =
-    peek strm >>= function
-      | None -> return None
-      | Some ch1 ->
-        junk strm >>= fun () ->
-        match ch1 with
-          | '\000'..'\127' -> return (Some (Char.code ch1, [ch1]))
-          | '\192'..'\223' -> (
-            peek strm >>= function
-              | None -> return None
-              | Some ch2 ->
-                junk strm >>= fun () ->
-                let n1 = Char.code ch1 in
-                let n2 = Char.code ch2 in
-                  if (n2 lsr 6 != 0b10) then fail IllegalCharacter
-                  else
-                    let code = ((n1 land 0x1f) lsl 6) lor (n2 land 0x3f) in
-                      return (Some (code, [ch1; ch2]))
-          )
-          | '\224'..'\239' -> (
-            peek strm >>= function
-              | None -> return None
-              | Some ch2 ->
-                junk strm >>= fun () ->
-                peek strm >>= function
-                  | None -> raise IllegalCharacter
-                  | Some ch3 ->
-                    junk strm >>= fun () ->
-                    let n1 = Char.code ch1
-                    and n2 = Char.code ch2
-                    and n3 = Char.code ch3 in
-                      if (n2 lsr 6 != 0b10) || (n3 lsr 6 != 0b10) then
-                        fail IllegalCharacter
-                      else
-                        let code = 
-                          ((n1 land 0x0f) lsl 12) lor
-                            ((n2 land 0x3f) lsl 6) lor (n3 land 0x3f)
-                        in
-                          if (code >= 0xd800) && (code <= 0xdf00) then
-                            fail IllegalCharacter
-                          else return (Some (code, [ch1; ch2; ch3]))
-          )
-          | '\240'..'\247' -> (
-            peek strm >>= function
-              | None -> return None
-              | Some ch2 ->
-                junk strm >>= fun () ->
-                peek strm >>= function
-                  | None -> raise IllegalCharacter
-                  | Some ch3 ->
-                    junk strm >>= fun () ->
-                    peek strm >>= function
-                      | None -> raise IllegalCharacter
-                      | Some ch4 ->
-                        junk strm >>= fun () ->
-                        let n1 = Char.code ch1
-                        and n2 = Char.code ch2
-                        and n3 = Char.code ch3
-                        and n4 = Char.code ch4 in
-                          if (n2 lsr 6 != 0b10) ||
-                            (n3 lsr 6 != 0b10) || (n4 lsr 6 != 0b10) then
-                            fail IllegalCharacter
-                          else
-                            return (Some (((n1 land 0x07) lsl 18) lor
-                                             ((n2 land 0x3f) lsl 12) lor
-                                             ((n3 land 0x3f) lsl 6)
-                                          lor (n4 land 0x3f),
-                                          [ch1; ch2; ch3; ch4]))
-          )
-          | _ ->
-            fail IllegalCharacter
-
 end
 
-module LikeLWT =
+module LocatedStream (M: MONAD) (I : INPUT with type 'a t = 'a M.t) =
 struct
-  type 'a t = 'a
+  include M
+  open I
 
-  let return x = x
-  let fail = raise
-  let (>>=) v f = f v
-  let catch f1 f2 = try f1 () with exn -> f2 exn
+  type source = I.stream
 
   exception Located_exn of (int * int) * exn
-  let peek = Stream.peek
-  let junk = Stream.junk
-
-  type orig_stream = char Stream.t
 
   type stream = {
     mutable line : int;
     mutable col : int;
-    mutable decode : orig_stream -> (int * char list) option;
-    stream : char Stream.t
+    mutable decoder : source -> int option t;
+    stream : source
   }
-    
 
+  let set_decoder encname strm =
+    let decoder = I.make_decoder encname in
+      strm.decoder <- decoder;
+      ()
 
-  module E = Encoding (struct
-    type 'a t = 'a
-    let return = return
-    let (>>=) = (>>=)
-    let fail = fail
-    type stream = orig_stream
-    let peek = peek
-    let junk = junk
-  end)
+  let make_stream source =
+    { line = 0;
+      col = 0;
+      decoder = I.make_decoder "UTF-8";
+      stream = source
+    }
 
-  let encode_unicode = E.encode_utf8
+  let error strm exn =
+    M.fail (Located_exn ((strm.line, strm.col), exn))
 
-  let make_stream strm =
-    let decode = (* E.autodetect strm in *) E.decode_utf8 in
-      { line = 0;
-        col = 0;
-        decode = decode;
-        stream = strm
-      }
-
-  let fail_located strm exn =
-    fail (Located_exn ((strm.line, strm.col), exn))
-
-  let next_char strm (eof:unit -> 'a t)  f =
-    strm.decode strm.stream >>= function
-      | Some (u, chs) ->
+  let next_char strm eof f =
+    strm.decoder strm.stream >>= function
+      | Some u ->
         if u = 0x000A then (
           strm.line <- strm.line + 1;
           strm.col <- 0
@@ -171,48 +188,42 @@ struct
           strm.col <- strm.col + 1;
         f u
       | None -> eof ()
-
-  let raise_located strm exn =
-    fail (Located_exn ((strm.line, strm.col), exn))
-
-
-  let xml_decl ~version ?encoding ?standalone strm =
-    print_endline "xml_decl"
-    
 end
 
-module XmlStanza =
+module XmlStanza (M : MONAD) =
 struct
-  type 'a t = 'a LikeLWT.t
-
   type data =
     | StartTag of string * (string * string) list * bool
     | EndTag of string
-    | Doctype of Xmllexer_generic.doctype
+    | Doctype of doctype
     | PI of string * string
     | Text of string
 
   type token = data option
+  type 'a t = 'a M.t
 
   let emit_start_tag name attrs selfclosing =
-      Some (StartTag (name, attrs, selfclosing))
+    M.return (Some (StartTag (name, attrs, selfclosing)))
 
   let emit_end_tag name =
-    Some (EndTag name)
+    M.return (Some (EndTag name))
 
   let emit_doctype doctype =
-    Some (Doctype doctype)
+    M.return (Some (Doctype doctype))
 
   let emit_pi target data =
-    Some (PI (target, data))
+    M.return (Some (PI (target, data)))
 
   let emit_text text =
-    Some (Text text)
+    M.return (Some (Text text))
 
   let emit_eof () =
-    None
+    M.return None
 end
 
-module M = Xmllexer_generic.Make (Xmllexer_generic.XName) (LikeLWT) (XmlStanza)
+module M = Make
+  (LocatedStream (UnitMonad) (Input (UnitMonad)))
+  (Encoding)
+  (XmlStanza (UnitMonad))
 
-include M
+(* include M *)

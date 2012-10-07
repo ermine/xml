@@ -16,6 +16,13 @@ Flag testing
   Description: Compile tests
   Default: false
 
+Flag text
+  Description: Compile testing with ocaml-text
+  Default: false
+
+Flag lwt
+  Description: Compile testing with lwt
+  Default: false
 
 Library erm_xml
   Path:       .
@@ -25,9 +32,23 @@ Library erm_xml
 Executable test1
   Path:       tests
   Install:    false
-  Build$:     flag(testing)
+  Build$:     flag(testing) && flag(text)
   MainIs:     test1.ml
+  BuildDepends: erm_xml
+
+Executable test2
+  Path:       tests
+  Install:    false
+  Build$:     flag(testing)
+  MainIs:     test2.ml
   BuildDepends: erm_xml, text
+
+Executable test3
+  Path:       tests
+  Install:    false
+  Build$:     flag(testing) && flag(lwt)
+  MainIs:     test3.ml
+  BuildDepends: erm_xml, lwt, lwt.unix
 
 Executable light_test
   Path:       tests

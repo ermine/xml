@@ -2,10 +2,11 @@
  * (c) 2007-2012 Anastasia Gornostaeva
  *)
 
+open Xmllexer
+
 module XmlStanza =
 struct
-  type 'a t = 'a Xmllexer.LikeLWT.t
-
+  type 'a t = 'a
   type token = unit
 
   let emit_start_tag name attrs selfclosing =
@@ -31,10 +32,13 @@ struct
     raise End_of_file
 end
 
-module M = Xmllexer_generic.Make (Xmllexer_generic.XName)
-  (Xmllexer.LikeLWT) (XmlStanza)
+module M = Xmllexer_generic.Make
+  (LocatedStream (UnitMonad) (Input (UnitMonad)))
+  (Encoding)
+  (XmlStanza)
 
 let _ =
   let strm = Stream.of_channel (open_in Sys.argv.(1)) in
+  let strm = M.S.make_stream strm in
   let next_token = M.make_lexer strm in
   let rec loop () = next_token (); loop () in loop ()

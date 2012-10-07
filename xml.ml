@@ -311,11 +311,14 @@ let string_of_tag (ns, name) =
     Printf.sprintf "(%S) %s" prefix name
       
 
-module XmlParser = Xmllexer.M
-module XStanza = Xmllexer.XmlStanza
-open XStanza
+open Xmllexer
+
+module XmlParser = M
+module X = XmlStanza (UnitMonad)
+module S = LocatedStream (UnitMonad) (Input (UnitMonad))
       
 let parse_document strm =
+  let strm = XmlParser.S.make_stream strm in
   let next_token = XmlParser.make_lexer strm in
   let namespaces = Hashtbl.create 1 in
   let () = Hashtbl.add namespaces "xml" ns_xml in
@@ -328,7 +331,7 @@ let parse_document strm =
     match next_token () with
       | Some t -> (
         match t with
-          | StartTag (name, attrs, selfclosing) ->
+          | X.StartTag (name, attrs, selfclosing) ->
             let qname, lnss, attrs = parse_element_head namespaces name attrs in
             let el = (qname, attrs, []) in
               if selfclosing then (
@@ -347,17 +350,17 @@ let parse_document strm =
                 remove_namespaces namespaces lnss;
                 loop ()
               )
-          | EndTag _name ->
+          | X.EndTag _name ->
             (* let qname = parse_qname namespaces (split_name name) in *)
             if Stack.length stack > 1 then 
               add_element (Xmlelement (Stack.pop stack))
             else
               ()
-          | Text text ->
+          | X.Text text ->
             add_element (Xmlcdata text);
             loop ()
-          | Doctype _              
-          | PI _ ->
+          | X.Doctype _              
+          | X.PI _ ->
             loop ()
       )
       | None -> ()
@@ -366,17 +369,17 @@ let parse_document strm =
       loop ();
       let el = Stack.pop stack in
         Xmlelement el
-    with XmlParser.Located_exn ((line, col), exn) ->
+    with S.Located_exn ((line, col), exn) ->
       match exn with
-        | XmlParser.Error msg ->
+        | XmlParser.Exn_msg msg ->
           Printf.eprintf "%d:%d %s\n" line col msg;
           Pervasives.exit 127
-        | XmlParser.Error_ExpectedChar chs ->
+        | XmlParser.Exn_ExpectedChar chs ->
           Printf.eprintf "%d:%d Expected '%s'\n" line col
             (String.make 1 (List.hd chs));
           Pervasives.exit 127          
-        | XmlParser.Error_CharToken u ->
-          let chs = XmlParser.S.encode_unicode u in
+        | XmlParser.Exn_CharToken u ->
+          let chs = XmlParser.E.encode_unicode u in
           let str = String.create (List.length chs) in
           let rec iteri i = function
             | [] -> ()
