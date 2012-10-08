@@ -202,8 +202,9 @@ let parse_document strm =
                 loop ()
               )
           | X.EndTag _name ->
-            if Stack.length stack > 1 then 
-              add_element (Xmlelement (Stack.pop stack))
+            if Stack.length stack > 1 then
+              let (q, a, els) = Stack.pop stack in
+                add_element (Xmlelement (q, List.rev a, List.rev els))
             else
               ()
           | X.Text text ->
@@ -217,8 +218,8 @@ let parse_document strm =
   in
     try
       loop ();
-      let el = Stack.pop stack in
-        Xmlelement el
+      let (q, a, els) = Stack.pop stack in
+        Xmlelement (q, List.rev a, List.rev els)
     with S.Located_exn ((line, col), exn) ->
       match exn with
         | XmlParser.Exn_msg msg ->
