@@ -38,7 +38,7 @@ type dtd_attr_type = [
 ]
 
 type dtd_attr_default = [
-  `Required
+| `Required
 | `Implied
 ]
 

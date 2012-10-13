@@ -91,6 +91,4 @@ val parse_element_head :
   qname * (namespace * prefix) list * attribute list
 val string_of_tag : qname -> string
 
-val parse_document : char Stream.t -> element
-
   

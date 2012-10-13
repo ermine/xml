@@ -174,13 +174,13 @@ module XmlParser = M
 module X = XmlStanza (UnitMonad)
 module S = LocatedStream (UnitMonad) (Input (UnitMonad))
 
-let parse_document strm =
-  let strm = XmlParser.S.make_stream strm in
+let parse_document inc =
+  let strm = XmlParser.S.make_stream (Stream.of_channel inc) in
   let next_token = XmlParser.make_lexer strm in
   let stack = Stack.create () in
   let add_element el =
-    let (qname, attrs, subels) = Stack.pop stack in
-      Stack.push (qname, attrs, (el :: subels)) stack
+    let (name, attrs, subels) = Stack.pop stack in
+      Stack.push (name, attrs, (el :: subels)) stack
   in
   let rec loop () =
     match next_token () with
@@ -198,15 +198,15 @@ let parse_document strm =
                 )
               ) else (
                 Stack.push el stack;
-                loop ();
                 loop ()
               )
           | X.EndTag _name ->
             if Stack.length stack > 1 then
               let (q, a, els) = Stack.pop stack in
-                add_element (Xmlelement (q, List.rev a, List.rev els))
+                add_element (Xmlelement (q, List.rev a, List.rev els));
+                loop ()
             else
-              ()
+              loop ()
           | X.Text text ->
             add_element (Xmlcdata text);
             loop ()
@@ -243,3 +243,37 @@ let parse_document strm =
           Printf.eprintf "%d:%d %s\n" line col (Printexc.to_string exn);
           Pervasives.exit 127
 
+module Serialization =
+struct
+   let string_of_attr (name, value) =
+     (name) ^ "='" ^ encode value ^ "'"
+       
+   let string_of_list f sep = function
+     | [] -> ""
+     | x :: [] -> f x
+     | x :: xs -> List.fold_left (fun res x -> res ^ sep ^ (f x)) (f x) xs
+         
+   let rec aux_serialize out = function
+     | Xmlelement (name, attrs, children) ->
+       out "<";
+       out name;
+       if attrs <> [] then (
+         out " ";
+         out (string_of_list string_of_attr " " attrs)
+       );
+       if children = [] then
+         out "/>"
+       else (
+         out ">";
+         List.iter (aux_serialize out) children;
+         out "</";
+         out name;
+         out ">"
+         )
+     | Xmlcdata text ->
+       out (encode text)
+           
+   let serialize_document out xml =
+     aux_serialize out xml
+       
+end

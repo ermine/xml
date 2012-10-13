@@ -4,19 +4,55 @@
 
 open Xmllexer_generic
 
-module type INPUT =
-sig
-  type 'a t
-  type stream
-  val make_decoder : string -> (stream -> int option t)
-end
-
-module UnitMonad =
+module IterMonad =
 struct
-  type 'a t = 'a
-  let return x = x
+  type input = {
+    buf : string;
+    i : int;
+    len : int;
+  }
+
+  type data =
+    | Chunk of input
+    | EOF
+
+  let empty_chunk = {
+    buf = "";
+    i = 0;
+    len = 0;
+  }
+
+  let empty_stream = Chunk empty_chunk
+
+  let is_empty s =
+    s.i = s.len
+
+  type 'a t =
+    | Return of 'a * data
+    | Continue of (data -> 'a t)
+
+  let return x = Return (x, empty_stream)
   let fail = raise
-  let (>>=) v f = f v
+  let rec bind v f =
+    match v with
+      | Return (x, s) -> (
+        match f x with
+          | Return (x, _) -> Return (x, s)
+          | Continue k -> k s
+      )
+      | Continue k -> Continue (fun stream -> bind (k stream) f)
+    
+  let (>>=) = bind
+
+  let rec get =
+    Continue (function
+      | EOF -> Return (None, EOF)
+      | Chunk s ->
+        if s.i < s.len then
+          Return (Some s.buf.[s.i], Chunk {s with i = s.i + 1})
+        else
+          get
+    )
 end
 
 module Decoder (I : sig type 'a t
@@ -24,20 +60,20 @@ module Decoder (I : sig type 'a t
                         val return : 'a -> 'a t
                         val fail : exn -> 'a t
                         type stream
-                        val get : stream -> char option t end) =
+                        val get : char option t end) =
 struct
   open I
 
   exception IllegalCharacter
     
-  let decode_utf8 strm =
-    I.get strm >>= function
+  let decode_utf8 =
+    I.get >>= function
       | None -> return None
       | Some ch1 ->
         match ch1 with
           | '\000'..'\127' -> return (Some (Char.code ch1))
           | '\192'..'\223' -> (
-            I.get strm >>= function
+            I.get >>= function
               | None -> fail IllegalCharacter
               | Some ch2 ->
                 let n1 = Char.code ch1 in
@@ -48,10 +84,10 @@ struct
                       return (Some (code))
           )
           | '\224'..'\239' -> (
-            I.get strm >>= function
+            I.get >>= function
               | None -> fail IllegalCharacter
               | Some ch2 ->
-                I.get strm >>= function
+                I.get >>= function
                   | None -> fail IllegalCharacter
                   | Some ch3 ->
                     let n1 = Char.code ch1
@@ -69,13 +105,13 @@ struct
                           else return (Some (code))
           )
           | '\240'..'\247' -> (
-            I.get strm >>= function
+            I.get >>= function
               | None -> fail IllegalCharacter
               | Some ch2 ->
-                I.get strm >>= function
+                I.get >>= function
                   | None -> fail IllegalCharacter
                   | Some ch3 ->
-                    I.get strm >>= function
+                    I.get >>= function
                       | None -> fail IllegalCharacter
                       | Some ch4 ->
                         let n1 = Char.code ch1
@@ -95,19 +131,11 @@ struct
             fail IllegalCharacter
 end
 
-module Input (M : MONAD) =
+module Input =
 struct
-  type 'a t = 'a M.t
-  type stream = char Stream.t
-  let get s =
-    match Stream.peek s with
-      | Some c -> Stream.junk s; M.return (Some c)
-      | None -> M.return None
-
-  module D = Decoder 
-    (struct include M
-            type stream = char Stream.t
-            let get = get end)
+  module D = Decoder (struct include IterMonad
+                             type stream = IterMonad.data
+  end)
 
   exception UnknownEncoding
     
@@ -147,39 +175,38 @@ struct
       List.map Char.chr bytes
 end
 
-module LocatedStream (M: MONAD) (I : INPUT with type 'a t = 'a M.t) =
+module LocatedStream =
 struct
-  include M
-  open I
-
-  type source = I.stream
+  include IterMonad
 
   exception Located_exn of (int * int) * exn
 
   type stream = {
     mutable line : int;
     mutable col : int;
-    mutable decoder : source -> int option t;
-    stream : source
+    mutable decoder : int option t;
   }
 
+  open Input
+
   let set_decoder encname strm =
-    let decoder = I.make_decoder encname in
+    let decoder = make_decoder encname in
       strm.decoder <- decoder;
       ()
 
-  let make_stream source =
+  type source = unit
+
+  let make_stream () =
     { line = 0;
       col = 0;
-      decoder = I.make_decoder "UTF-8";
-      stream = source
+      decoder = make_decoder "UTF-8";
     }
 
   let error strm exn =
-    M.fail (Located_exn ((strm.line, strm.col), exn))
+    fail (Located_exn ((strm.line, strm.col), exn))
 
   let next_char strm eof f =
-    strm.decoder strm.stream >>= function
+    strm.decoder >>= function
       | Some u ->
         if u = 0x000A then (
           strm.line <- strm.line + 1;
@@ -221,69 +248,101 @@ struct
     M.return None
 end
 
-module M = Make
-  (LocatedStream (UnitMonad) (Input (UnitMonad)))
-  (Encoding)
-  (XmlStanza (UnitMonad))
+module X = XmlStanza(IterMonad)
 
-module X = XmlStanza (UnitMonad)
-module S = LocatedStream (UnitMonad) (Input (UnitMonad))
-open Xml
-      
+module M = Make
+  (LocatedStream)
+  (Encoding)
+  (X)
+  
+open IterMonad
+  
+
+
 let parse_document inc =
-  let strm = M.S.make_stream (Stream.of_channel inc) in
-  let next_token = M.make_lexer strm in
+  let stream = M.S.make_stream () in
+  let buf = String.create 8192 in
+  let next_token = M.make_lexer stream in
   let namespaces = Hashtbl.create 1 in
-  let () = Hashtbl.add namespaces "xml" ns_xml in
+  let () = Hashtbl.add namespaces "xml" Xml.ns_xml in
   let stack = Stack.create () in
+  let stack_ns = Stack.create () in
   let add_element el =
     let (qname, attrs, subels) = Stack.pop stack in
       Stack.push (qname, attrs, (el :: subels)) stack
   in
-  let rec loop () =
-    match next_token () with
-      | Some t -> (
-        match t with
-          | X.StartTag (name, attrs, selfclosing) ->
-            let qname, lnss, attrs = parse_element_head namespaces name attrs in
-            let el = (qname, attrs, []) in
-              if selfclosing then (
-                remove_namespaces namespaces lnss;
-                if Stack.is_empty stack then (
-                  Stack.push el stack;
-                  loop ();
-                ) else (
-                  add_element (Xmlelement el);
-                  remove_namespaces namespaces lnss;
-                  loop ()
-                )
-              ) else (
-                Stack.push el stack;
-                loop ();
-                remove_namespaces namespaces lnss;
-                loop ()
-              )
-          | X.EndTag _name ->
-            (* let qname = parse_qname namespaces (split_name name) in *)
-            if Stack.length stack > 1 then
-              let q, a, els = Stack.pop stack in
-                add_element (Xmlelement (q, a, List.rev els))
-            else
-              ()
-          | X.Text text ->
-            add_element (Xmlcdata text);
-            loop ()
-          | X.Doctype _              
-          | X.PI _ ->
-            loop ()
-      )
-      | None -> ()
+  let rec process_token = function
+    | X.StartTag (name, attrs, selfclosing) ->
+      let qname, lnss, attrs =
+        Xml.parse_element_head namespaces name attrs in
+      let el = (qname, attrs, []) in
+        if selfclosing then (
+          Xml.remove_namespaces namespaces lnss;
+          if Stack.is_empty stack then (
+            Stack.push el stack;
+            next_token ()
+          ) else (
+            add_element (Xml.Xmlelement el);
+            Xml.remove_namespaces namespaces lnss;
+            next_token ()
+          )
+        ) else (
+          Stack.push el stack;
+          Stack.push lnss stack_ns;
+          next_token ()
+        )
+    | X.EndTag _name ->
+      let lnss = Stack.pop stack_ns in
+        Xml.remove_namespaces namespaces lnss;
+        if Stack.length stack > 1 then
+          let q, a, els = Stack.pop stack in
+            add_element (Xml.Xmlelement (q, a, List.rev els));
+            next_token ()
+        else
+          next_token ()
+    | X.Text text ->
+      add_element (Xml.Xmlcdata text);
+      next_token ()
+    | X.Doctype _              
+    | X.PI _ ->
+      next_token ()
+  and loop v inp =
+    match v with
+      | Return (Some result, rest) -> loop (process_token result) rest
+      | Return (None, rest) -> ()
+      | Continue cont ->
+        let rec upload f rest =
+          let stream =
+            match rest with
+              | EOF -> EOF
+              | Chunk s ->
+                if is_empty s then
+                  let size = input inc buf 0 8192 in
+                    if size = 0 then
+                      EOF
+                    else
+                      let str =
+                        if size < 8192 then
+                          String.sub buf 0 size
+                        else
+                          buf
+                      in
+                        Chunk {buf = str; i = 0; len = size}
+                else
+                  Chunk s
+          in
+            match f stream with
+              | Return (None, rest) -> ()
+              | Return (Some r, rest) -> loop (process_token r) rest
+              | Continue cont -> upload cont empty_stream
+        in
+          upload cont inp
   in
     try
-      loop ();
+      loop (next_token ()) empty_stream;
       let (q, a, els) = Stack.pop stack in
-        Xmlelement (q, a, List.rev els)
-    with S.Located_exn ((line, col), exn) ->
+        Xml.Xmlelement (q, a, List.rev els)
+    with LocatedStream.Located_exn ((line, col), exn) ->
       match exn with
         | M.Exn_msg msg ->
           Printf.eprintf "%d:%d %s\n" line col msg;
@@ -305,3 +364,5 @@ let parse_document inc =
         | exn ->
           Printf.eprintf "%d:%d %s\n" line col (Printexc.to_string exn);
           Pervasives.exit 127
+
+  

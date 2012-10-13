@@ -1,6 +1,6 @@
 OASISFormat: 0.3
 Name:        erm_xml
-Version:     0.2
+Version:     0.3
 Authors:     Anastasia Gornostaeva
 Copyrights:  (C) 2007-2012 Anastasia Gornostaeva
 License:     BSD3
@@ -26,7 +26,8 @@ Flag lwt
 
 Library erm_xml
   Path:       .
-  Modules:    Xml, Xmllexer_generic, Xmllexer, Light_xml
+  Modules:    Xml, Xmllexer_generic, Xmllexer, XmllexerI
+#              Light_xml
   InternalModules: Xml_encode, Xml_decode
 
 Executable test1
@@ -56,6 +57,12 @@ Executable light_test
   Build$:     flag(testing)
   MainIs:     light_test.ml
   BuildDepends: erm_xml, text
+
+Executable test
+  Path: tests
+  Install: false
+  MainIs: test.ml
+  BuildDepends: erm_xml
 
 SourceRepository github
   Type:     git
