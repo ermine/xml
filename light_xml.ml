@@ -174,8 +174,8 @@ module XmlParser = M
 module X = XmlStanza (UnitMonad)
 module S = LocatedStream (UnitMonad) (Input (UnitMonad))
 
-let parse_document inc =
-  let strm = XmlParser.S.make_stream (Stream.of_channel inc) in
+let parse_stream strm =
+  let strm = XmlParser.S.make_stream strm in
   let next_token = XmlParser.make_lexer strm in
   let stack = Stack.create () in
   let add_element el =
@@ -242,6 +242,14 @@ let parse_document inc =
         | exn ->
           Printf.eprintf "%d:%d %s\n" line col (Printexc.to_string exn);
           Pervasives.exit 127
+
+let parse_string str =
+  let strm = Stream.of_string str in
+    parse_stream strm
+
+let parse_document f =
+  let strm = Stream.of_channel f in
+    parse_stream strm
 
 module Serialization =
 struct

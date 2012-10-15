@@ -26,7 +26,9 @@ Flag lwt
 
 Library erm_xml
   Path:       .
-  Modules:    Xml, Xmllexer_generic, Xmllexer, XmllexerI
+  Modules:    Xml, Xmllexer_generic, Xmllexer, XmllexerI, XmllexerI2, 
+              XmllexerE,
+              Light_xml
 #              Light_xml
   InternalModules: Xml_encode, Xml_decode
 

@@ -7,8 +7,15 @@ let () =
         Xmllexer.parse_document f
       | "i" ->
         XmllexerI.parse_document f
+      | "i2" ->
+        XmllexerI2.parse_document f
+      | "e" ->
+        XmllexerE.parse_document f
       | _ -> failwith "unknown option"        
   in
+    (*
   let ser = Xml.Serialization.create [] in
   let out = print_string in
     Xml.Serialization.serialize_document ser out xml
+    *)
+    ()

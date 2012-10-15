@@ -1,9 +1,12 @@
 # OASIS_START
-# DO NOT EDIT (digest: 5cdf895ffb1780c81b8eafb93d037c80)
+# DO NOT EDIT (digest: bb04400e54720b7afd01acc2004976e5)
 Xml
 Xmllexer_generic
 Xmllexer
 XmllexerI
+XmllexerI2
+XmllexerE
+Light_xml
 Xml_encode
 Xml_decode
 # OASIS_STOP
