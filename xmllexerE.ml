@@ -36,111 +36,121 @@ struct
     
   let (>>=) = bind
 
+  exception IllegalCharacter
+    
   let rec get s =
     if s.is_final then
       Return None
-    else
-      if s.i < s.len then
-        let c = s.buf.[s.i] in
-          s.i <- s.i+1;
-          Return (Some c)
-      else
-        Continue get
-end
-
-module Decoder (I : sig type 'a t
-                        val (>>=) : 'a t -> ('a -> 'b t) -> 'b t
-                        val return : 'a -> 'a t
-                        val fail : exn -> 'a t
-                        type stream
-                        val get : stream -> char option t
-end) =
-struct
-  open I
-
-  exception IllegalCharacter
-    
-  let decode_utf8 s =
-    I.get s >>= function
-      | None -> return None
-      | Some ch1 ->
+    else if s.i < s.len then
+      let ch1 = s.buf.[s.i] in
+        s.i <- s.i + 1;
         match ch1 with
-          | '\000'..'\127' -> return (Some (Char.code ch1))
-          | '\192'..'\223' -> (
-            I.get s >>= function
-              | None -> fail IllegalCharacter
-              | Some ch2 ->
-                let n1 = Char.code ch1 in
-                let n2 = Char.code ch2 in
-                  if (n2 lsr 6 != 0b10) then fail IllegalCharacter
-                  else
-                    let code = ((n1 land 0x1f) lsl 6) lor (n2 land 0x3f) in
-                      return (Some (code))
-          )
-          | '\224'..'\239' -> (
-            I.get s >>= function
-              | None -> fail IllegalCharacter
-              | Some ch2 ->
-                I.get s >>= function
-                  | None -> fail IllegalCharacter
-                  | Some ch3 ->
-                    let n1 = Char.code ch1
-                    and n2 = Char.code ch2
-                    and n3 = Char.code ch3 in
-                      if (n2 lsr 6 != 0b10) || (n3 lsr 6 != 0b10) then
-                        fail IllegalCharacter
-                      else
-                        let code = 
-                          ((n1 land 0x0f) lsl 12) lor
-                            ((n2 land 0x3f) lsl 6) lor (n3 land 0x3f)
-                        in
-                          if (code >= 0xd800) && (code <= 0xdf00) then
-                            fail IllegalCharacter
-                          else return (Some (code))
-          )
-          | '\240'..'\247' -> (
-            I.get s >>= function
-              | None -> fail IllegalCharacter
-              | Some ch2 ->
-                I.get s >>= function
-                  | None -> fail IllegalCharacter
-                  | Some ch3 ->
-                    I.get s >>= function
-                      | None -> fail IllegalCharacter
-                      | Some ch4 ->
+          | '\000'..'\127' -> Return (Some (Char.code ch1))
+          | '\192'..'\223' ->
+            let rec cont s =
+              if s.is_final then
+                fail IllegalCharacter
+              else if s.i < s.len then
+                let ch2 = s.buf.[s.i] in
+                  s.i <- s.i+1;
+                  let n1 = Char.code ch1 in
+                  let n2 = Char.code ch2 in
+                    if (n2 lsr 6 != 0b10) then fail IllegalCharacter
+                    else
+                      let code = ((n1 land 0x1f) lsl 6) lor (n2 land 0x3f) in
+                        Return (Some (code))
+              else
+                Continue cont
+            in
+              cont s
+              
+          | '\224'..'\239' ->
+            let rec cont s =
+              if s.is_final then
+                fail IllegalCharacter
+              else if s.i < s.len then
+                let ch2 = s.buf.[s.i] in
+                  s.i <- s.i + 1;
+                  let rec cont2 s =
+                    if s.is_final then
+                      fail IllegalCharacter
+                    else if s.i < s.len then
+                      let ch3 = s.buf.[s.i] in
+                        s.i <- s.i + 1;
                         let n1 = Char.code ch1
                         and n2 = Char.code ch2
-                        and n3 = Char.code ch3
-                        and n4 = Char.code ch4 in
-                          if (n2 lsr 6 != 0b10) ||
-                            (n3 lsr 6 != 0b10) || (n4 lsr 6 != 0b10) then
+                        and n3 = Char.code ch3 in
+                          if (n2 lsr 6 != 0b10) || (n3 lsr 6 != 0b10) then
                             fail IllegalCharacter
                           else
-                            return (Some (((n1 land 0x07) lsl 18) lor
-                                             ((n2 land 0x3f) lsl 12) lor
-                                             ((n3 land 0x3f) lsl 6)
-                                          lor (n4 land 0x3f)))
-          )
-    
+                            let code = 
+                              ((n1 land 0x0f) lsl 12) lor
+                                ((n2 land 0x3f) lsl 6) lor (n3 land 0x3f)
+                            in
+                              if (code >= 0xd800) && (code <= 0xdf00) then
+                                fail IllegalCharacter
+                              else Return (Some (code))
+                    else
+                      Continue cont2
+                  in
+                    cont2 s
+              else
+                Continue cont
+            in
+              cont s
+
+          | '\240'..'\247' ->
+            let rec cont s =
+              if s.is_final then
+                fail IllegalCharacter
+              else if s.i < s.len then
+                let ch2 = s.buf.[s.i] in
+                  s.i < s.i + 1;
+                  let rec cont2 s =
+                    if s.is_final then
+                      fail IllegalCharacter
+                    else if s.i < s.len then
+                      let ch3 = s.buf.[s.i] in
+                        s.i <- s.i + 1;
+                        let rec cont3 s =
+                          if s.is_final then
+                            fail IllegalCharacter
+                          else if s.i < s.len then
+                            let ch4 = s.buf.[s.i] in
+                              s.i <- s.i + 1;
+                              let n1 = Char.code ch1
+                              and n2 = Char.code ch2
+                              and n3 = Char.code ch3
+                              and n4 = Char.code ch4 in
+                                if (n2 lsr 6 != 0b10) ||
+                                  (n3 lsr 6 != 0b10) || (n4 lsr 6 != 0b10) then
+                                  fail IllegalCharacter
+                                else
+                                  Return (Some (((n1 land 0x07) lsl 18) lor
+                                                   ((n2 land 0x3f) lsl 12) lor
+                                                   ((n3 land 0x3f) lsl 6)
+                                                lor (n4 land 0x3f)))
+                          else
+                            Continue cont3
+                        in
+                          cont3 s
+                    else
+                      Continue cont2
+                  in
+                    cont2 s
+              else
+                Continue cont
+            in
+              cont s
+
           | _ ->
             fail IllegalCharacter
-end
 
-module Input =
-struct
-  module D = Decoder (struct include IterMonad
-                             type stream = IterMonad.input
-  end)
-
-  exception UnknownEncoding
-    
-  let make_decoder encname =
-    if encname = "UTF-8" then
-      D.decode_utf8
     else
-      raise UnknownEncoding
+      Continue get
+
 end
-  
+
 module Encoding =
 struct
   exception IllegalCharacter
@@ -185,17 +195,12 @@ struct
     source : source
   }
 
-  open Input
-
-  let set_decoder encname strm =
-    let decoder = make_decoder encname in
-      strm.decoder <- decoder;
-      ()
+  let set_decoder encname strm = ()
 
   let make_stream source =
     { line = 0;
       col = 0;
-      decoder = make_decoder "UTF-8";
+      decoder = get;
       source = source
     }
 
