@@ -1420,12 +1420,21 @@ struct
       | PrologMiscState ->
         prolog_state state strm
         
-
-  let make_lexer strm =
-    let state = {
+  let create_state () =
+    {
       tmp_buffer = Buffer.create 30;
       stack = Stack.create ();
       next_state = PrologXmlDeclState
-    } in
+    }
+
+  let lexer state strm =tokenizer state strm
+
+  let reset state =
+    Buffer.reset state.tmp_buffer;
+    Stack.clear state.stack;
+    state.next_state <- PrologXmlDeclState
+
+  let make_lexer strm =
+    let state = create_state () in
       fun () -> tokenizer state strm
 end

@@ -58,7 +58,7 @@ Executable light_test
   Install:    false
   Build$:     flag(testing)
   MainIs:     light_test.ml
-  BuildDepends: erm_xml, text
+  BuildDepends: erm_xml
 
 Executable test
   Path: tests

@@ -105,7 +105,7 @@ struct
                 fail IllegalCharacter
               else if s.i < s.len then
                 let ch2 = s.buf.[s.i] in
-                  s.i < s.i + 1;
+                  s.i <- s.i + 1;
                   let rec cont2 s =
                     if s.is_final then
                       fail IllegalCharacter
@@ -308,22 +308,21 @@ let parse_document inc =
     | X.Doctype _              
     | X.PI _ ->
       next_token ()
-  and loop v =
-    match v with
-      | Return (Some result) -> loop (process_token result)
-      | Return None -> ()
-      | Continue cont ->
-        if source.i < source.len then
-          ()
-        else
-          let size = input inc source.buf 0 8192 in
-            if size = 0 then
-              source.is_final <- true
-            else (
-              source.i <- 0;
-              source.len <- size;
-            );
-            loop (cont source)
+  and loop = function
+    | Return (Some result) -> loop (process_token result)
+    | Return None -> ()
+    | Continue cont ->
+      if source.i < source.len then
+        ()
+      else
+        let size = input inc source.buf 0 8192 in
+          if size = 0 then
+            source.is_final <- true
+          else (
+            source.i <- 0;
+            source.len <- size;
+          );
+          loop (cont source)
   in
     try
       loop (next_token ());

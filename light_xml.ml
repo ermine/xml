@@ -174,9 +174,7 @@ module XmlParser = M
 module X = XmlStanza (UnitMonad)
 module S = LocatedStream (UnitMonad) (Input (UnitMonad))
 
-let parse_stream strm =
-  let strm = XmlParser.S.make_stream strm in
-  let next_token = XmlParser.make_lexer strm in
+let parse next_token =
   let stack = Stack.create () in
   let add_element el =
     let (name, attrs, subels) = Stack.pop stack in
@@ -216,10 +214,16 @@ let parse_stream strm =
       )
       | None -> ()
   in
+    loop ();
+    let (q, a, els) = Stack.pop stack in
+      Xmlelement (q, List.rev a, List.rev els)
+
+let parse_stream strm =
+  let strm = XmlParser.S.make_stream strm in
+  let next_token = XmlParser.make_lexer strm in
     try
-      loop ();
-      let (q, a, els) = Stack.pop stack in
-        Xmlelement (q, List.rev a, List.rev els)
+      parse next_token
+        
     with S.Located_exn ((line, col), exn) ->
       match exn with
         | XmlParser.Exn_msg msg ->
