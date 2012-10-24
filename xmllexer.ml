@@ -221,17 +221,17 @@ struct
     M.return None
 end
 
+module LS = LocatedStream(UnitMonad) (Input (UnitMonad))
 module M = Make
-  (LocatedStream (UnitMonad) (Input (UnitMonad)))
+  (LS)
   (Encoding)
   (XmlStanza (UnitMonad))
 
 module X = XmlStanza (UnitMonad)
-module S = LocatedStream (UnitMonad) (Input (UnitMonad))
 open Xml
       
 let parse_document inc =
-  let strm = M.S.make_stream (Stream.of_channel inc) in
+  let strm = LS.make_stream (Stream.of_channel inc) in
   let next_token = M.make_lexer strm in
   let namespaces = Hashtbl.create 1 in
   let () = Hashtbl.add namespaces "xml" ns_xml in
@@ -283,7 +283,7 @@ let parse_document inc =
       loop ();
       let (q, a, els) = Stack.pop stack in
         Xmlelement (q, a, List.rev els)
-    with S.Located_exn ((line, col), exn) ->
+    with LS.Located_exn ((line, col), exn) ->
       match exn with
         | M.Exn_msg msg ->
           Printf.eprintf "%d:%d %s\n" line col msg;

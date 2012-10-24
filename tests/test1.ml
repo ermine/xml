@@ -32,13 +32,14 @@ struct
     raise End_of_file
 end
 
+module LS = LocatedStream (UnitMonad) (Input (UnitMonad))
 module M = Xmllexer_generic.Make
-  (LocatedStream (UnitMonad) (Input (UnitMonad)))
+  (LS)
   (Encoding)
   (XmlStanza)
 
 let _ =
   let strm = Stream.of_channel (open_in Sys.argv.(1)) in
-  let strm = M.S.make_stream strm in
+  let strm = LS.make_stream strm in
   let next_token = M.make_lexer strm in
   let rec loop () = next_token (); loop () in loop ()

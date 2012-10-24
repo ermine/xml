@@ -186,37 +186,35 @@ struct
 
   exception Located_exn of (int * int) * exn
 
-  type source = IterMonad.input
-
   type stream = {
     mutable line : int;
     mutable col : int;
-    mutable decoder : source -> int option t;
-    source : source
+    decoder : IterMonad.input -> int option t;
   }
 
   let set_decoder encname strm = ()
 
-  let make_stream source =
+  let make_stream () =
     { line = 0;
       col = 0;
       decoder = get;
-      source = source
     }
 
   let error strm exn =
     fail (Located_exn ((strm.line, strm.col), exn))
 
   let next_char strm eof f =
-    strm.decoder strm.source >>= function
-      | Some u ->
-        if u = 0x000A then (
-          strm.line <- strm.line + 1;
-          strm.col <- 0
-        ) else
-          strm.col <- strm.col + 1;
-        f u
-      | None -> eof ()
+    Continue (fun source ->
+      strm.decoder source >>= function
+        | Some u ->
+          if u = 0x000A then (
+            strm.line <- strm.line + 1;
+            strm.col <- 0
+          ) else
+            strm.col <- strm.col + 1;
+          f u
+        | None -> eof ()
+    )
 end
 
 module XmlStanza (M : MONAD) =
@@ -259,11 +257,9 @@ module M = Make
   
 open IterMonad
   
-
-
 let parse_document inc =
   let source = make_chunk 8192 in
-  let stream = M.S.make_stream source in
+  let stream = LocatedStream.make_stream () in
   let next_token = M.make_lexer stream in
   let namespaces = Hashtbl.create 1 in
   let () = Hashtbl.add namespaces "xml" Xml.ns_xml in
@@ -313,7 +309,7 @@ let parse_document inc =
     | Return None -> ()
     | Continue cont ->
       if source.i < source.len then
-        ()
+        loop (cont source)
       else
         let size = input inc source.buf 0 8192 in
           if size = 0 then

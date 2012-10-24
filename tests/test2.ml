@@ -74,8 +74,9 @@ end
 
 open Xmllexer
 
+module LS = LocatedStream (UnitMonad) (StringStream)
 module M = Xmllexer_generic.Make
-  (LocatedStream (UnitMonad) (StringStream))
+  (LS)
   (Encoding)
   (XStanza)
 
@@ -89,7 +90,7 @@ let _ =
   in
   let content = read_file () in
   let strm = StringStream.of_string content in
-  let strm = M.S.make_stream strm in
+  let strm = LS.make_stream strm in
   let next_token = M.make_lexer strm in
   let rec loop () = next_token (); loop () in
   let _ = loop () in

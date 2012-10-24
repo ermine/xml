@@ -256,11 +256,9 @@ module M = Make
   (X)
   
 open IterMonad
-  
-
 
 let parse_document inc =
-  let stream = M.S.make_stream () in
+  let stream = LocatedStream.make_stream () in
   let buf = String.create 8192 in
   let next_token = M.make_lexer stream in
   let namespaces = Hashtbl.create 1 in

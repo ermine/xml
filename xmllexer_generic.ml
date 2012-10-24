@@ -19,9 +19,6 @@ module type STREAM =
 sig
   include MONAD
   type stream
-  type source
-
-  val make_stream : source -> stream
   val set_decoder : string -> stream -> unit
   val next_char : stream -> (unit -> 'b t) -> (int -> 'b t) -> 'b t
   val error : stream -> exn -> 'a t

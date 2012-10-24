@@ -29,8 +29,9 @@ struct
 end
 
   
+module LS = Xmllexer.LocatedStream (Lwt) (Input)
 module M = Xmllexer_generic.Make
-  (Xmllexer.LocatedStream (Lwt) (Input))
+  (LS)
   (Xmllexer.Encoding)
   (Xmllexer.XmlStanza (Lwt))
 
@@ -40,7 +41,7 @@ let _ =
   Lwt_main.run (
     Lwt_io.open_file ~mode:Lwt_io.input Sys.argv.(1) >>= fun f ->
     let strm = Lwt_io.read_chars f in
-    let strm = M.S.make_stream strm in
+    let strm = LS.make_stream strm in
     let next_token = M.make_lexer strm in
     let rec loop () = next_token () >>= function
       | Some _ -> loop ()

@@ -219,7 +219,7 @@ let parse next_token =
       Xmlelement (q, List.rev a, List.rev els)
 
 let parse_stream strm =
-  let strm = XmlParser.S.make_stream strm in
+  let strm = LS.make_stream strm in
   let next_token = XmlParser.make_lexer strm in
     try
       parse next_token
