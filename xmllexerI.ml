@@ -202,8 +202,10 @@ struct
       decoder = make_decoder "UTF-8";
     }
 
-  let error strm exn =
-    fail (Located_exn ((strm.line, strm.col), exn))
+  let error ?stream exn =
+    match stream with
+      | None -> fail exn
+      | Some strm -> fail (Located_exn ((strm.line, strm.col), exn))
 
   let next_char strm eof f =
     strm.decoder >>= function

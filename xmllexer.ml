@@ -175,8 +175,10 @@ struct
       stream = source
     }
 
-  let error strm exn =
-    M.fail (Located_exn ((strm.line, strm.col), exn))
+  let error ?stream exn =
+    match stream with
+      | None -> fail exn
+      | Some strm -> M.fail (Located_exn ((strm.line, strm.col), exn))
 
   let next_char strm eof f =
     strm.decoder strm.stream >>= function

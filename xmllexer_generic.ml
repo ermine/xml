@@ -21,7 +21,7 @@ sig
   type stream
   val set_decoder : string -> stream -> unit
   val next_char : stream -> (unit -> 'b t) -> (int -> 'b t) -> 'b t
-  val error : stream -> exn -> 'a t
+  val error : ?stream:stream -> exn -> 'a t
 end
 
 type external_id =
@@ -218,7 +218,7 @@ struct
   exception Error_XMLDecl
 
   let not_eof () =
-    S.fail Exn_EOF
+    error Exn_EOF
 
   let rec add_chars state = function
     | [] -> ()
@@ -236,7 +236,7 @@ struct
         if u = x then (
           consume_sequence strm xs
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
         
   and consume_space strm =
@@ -244,7 +244,7 @@ struct
       if is_space u then
         S.return ()
       else
-        error strm Exn_ExpectedSpace
+        error ~stream:strm Exn_ExpectedSpace
     )
 
   let parse_xmldecl data =
@@ -397,7 +397,7 @@ struct
 
   let character_reference strm =
     let rec aux_entity u = function
-      | N [] -> error strm (Exn_CharToken u)
+      | N [] -> error ~stream:strm (Exn_CharToken u)
       | N ((c, L z) :: rest) ->
         if u = c then
           S.return u
@@ -430,9 +430,9 @@ struct
                       (* test unicode char *)
                       S.return acc
                     else
-                      error strm (Exn_msg "Expected hex")
+                      error ~stream:strm (Exn_msg "Expected hex")
                   else
-                    error strm (Exn_CharToken u)
+                    error ~stream:strm (Exn_CharToken u)
                 )
               in
                 get_hex_code false 0
@@ -447,14 +447,14 @@ struct
                       (* test unicode char *)
                       S.return acc
                     else
-                      error strm (Exn_CharToken u)
+                      error ~stream:strm (Exn_CharToken u)
                   else
-                    error strm (Exn_CharToken u)
+                    error ~stream:strm (Exn_CharToken u)
                 )
               in
                 get_code false (u - 0x0030)
             else 
-              error strm (Exn_CharToken u)
+              error ~stream:strm (Exn_CharToken u)
           )
         ) else
           aux_entity u entities
@@ -501,7 +501,7 @@ struct
           (* end of comment *)
           S.return ()
         else
-          error strm (Exn_msg "Unexpected '--'")
+          error ~stream:strm (Exn_msg "Unexpected '--'")
       )
 
     in
@@ -525,7 +525,7 @@ struct
         add_chars state (E.encode_unicode u);
         start_tag_name_state state strm
       ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
     )
   and self_closing_start_tag_state tagname state strm =
     next_char strm not_eof (fun u ->
@@ -536,7 +536,7 @@ struct
           state.next_state <- TextState;
         X.emit_start_tag tagname [] true
       ) else
-        error strm (Exn_CharToken u)
+        error ~stream:strm (Exn_CharToken u)
     )
   and end_tag_start_state state strm =
     next_char strm not_eof (fun u ->
@@ -544,7 +544,7 @@ struct
         add_chars state (E.encode_unicode u);
         end_tag_state state strm
       ) else
-        error strm (Exn_CharToken u)
+        error ~stream:strm (Exn_CharToken u)
     )
 
   and end_tag_state state strm =
@@ -561,12 +561,12 @@ struct
               state.next_state <- TextState;
             X.emit_end_tag tagname
           ) else
-            error strm (Exn_msg "Invalid end tag name")
+            error ~stream:strm (Exn_msg "Invalid end tag name")
       ) else if XName.is_name_char u then (
         add_chars state (E.encode_unicode u);
         end_tag_state state strm
       ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
     )
 
   and after_end_tag_state state strm =
@@ -583,9 +583,9 @@ struct
               state.next_state <- TextState;
             X.emit_end_tag tagname
           ) else
-            error strm (Exn_msg "Invalid end tag name")
+            error ~stream:strm (Exn_msg "Invalid end tag name")
       else
-        error strm (Exn_CharToken u)
+        error ~stream:strm (Exn_CharToken u)
     )
         
   and before_attribute_state tagname attrs state strm =
@@ -604,7 +604,7 @@ struct
         add_chars state (E.encode_unicode u);
         attribute_name_state tagname attrs state strm
       ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
     )
 
   and attribute_name_state tagname attrs state strm =
@@ -621,7 +621,7 @@ struct
         add_chars state (E.encode_unicode u);
         attribute_name_state tagname attrs state strm
       ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
     )
 
   and after_attribute_name_state state strm =
@@ -631,7 +631,7 @@ struct
       else if u = u_eq then
         before_attribute_value_state state strm
       else
-        error strm (Exn_CharToken u)
+        error ~stream:strm (Exn_CharToken u)
     )
       
   and before_attribute_value_state state strm =
@@ -643,7 +643,7 @@ struct
       else if u = u_apos then
         attribute_value_single_quoted_state state strm
       else
-        error strm (Exn_CharToken u)
+        error ~stream:strm (Exn_CharToken u)
     )
       
   and attribute_value_double_quoted_state state strm =
@@ -656,7 +656,7 @@ struct
         add_chars state (E.encode_unicode u);
         attribute_value_double_quoted_state state strm
       ) else if u = u_lt then
-        error strm (Exn_CharToken u)
+        error ~stream:strm (Exn_CharToken u)
         else (
           add_chars state (E.encode_unicode u);
           attribute_value_double_quoted_state state strm
@@ -673,7 +673,7 @@ struct
         add_chars state (E.encode_unicode u);
         attribute_value_single_quoted_state state strm
       ) else if u = u_lt then
-        error strm (Exn_CharToken u)
+        error ~stream:strm (Exn_CharToken u)
         else (
           add_chars state (E.encode_unicode u);
           attribute_value_single_quoted_state state strm
@@ -697,7 +697,7 @@ struct
         state.next_state <- TextState;
         X.emit_start_tag tagname attrs false
       ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
     )
           
       
@@ -707,7 +707,7 @@ struct
         add_chars state (E.encode_unicode u);
         pi_target_state state strm
       ) else
-        error strm (Exn_CharToken u)
+        error ~stream:strm (Exn_CharToken u)
     )
   and pi_target_state state strm =
     next_char strm not_eof (fun u ->
@@ -722,7 +722,7 @@ struct
         add_chars state (E.encode_unicode u);
         pi_target_state state strm
       ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
     )
   and before_pi_data_state target state strm =
     next_char strm not_eof (fun u ->
@@ -765,7 +765,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_name_state state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_name_state state strm =
       next_char strm not_eof (fun u ->
@@ -797,7 +797,7 @@ struct
             } in
               doctype_intsubsect_state doctype state strm
           else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_external_id_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -821,7 +821,7 @@ struct
         ) else if u = u_lbracket then
           doctype_intsubsect_state doctype state strm
           else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_before_systemliteral_state state strm =
       next_char strm not_eof (fun u ->
@@ -830,7 +830,7 @@ struct
         else if u = u_quot || u = u_apos then
           doctype_systemliteral_state u state strm 
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_systemliteral_state lim state strm =
       next_char strm not_eof (fun u ->
@@ -849,7 +849,7 @@ struct
         else if u = u_quot || u = u_apos then
           doctype_publicliteral_state u state strm
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_publicliteral_state lim state strm =
       next_char strm not_eof (fun u ->
@@ -869,7 +869,7 @@ struct
                    doctype_publicliteral_state lim state strm
                  )
           else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_before_intsubsect_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -878,7 +878,7 @@ struct
         else if u = u_lbracket then
           doctype_intsubsect_state doctype state strm
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_intsubsect_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -891,7 +891,7 @@ struct
         else if u = u_lt then
           doctype_markupdecl_state doctype state strm
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_intsubsect_end_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -900,7 +900,7 @@ struct
         else if u = u_gt then
           X.emit_doctype doctype
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_pereference_start_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -908,7 +908,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_pereference_state doctype state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_pereference_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -920,7 +920,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_pereference_state doctype state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_markupdecl_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -931,7 +931,7 @@ struct
           doctype_intsubsect_state {doctype with
             dtd = DTD_PI (target, data) :: doctype.dtd} state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_markupdecl_excl_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -954,10 +954,10 @@ struct
               consume_space strm >>= fun () ->
               doctype_element_state doctype state strm
             ) else
-                error strm (Exn_CharToken u)
+                error ~stream:strm (Exn_CharToken u)
           )
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_attlist_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -967,7 +967,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_attlist_name_state doctype state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_attlist_name_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -980,7 +980,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_attlist_name_state doctype state strm
         ) else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_attlist_attdef_state defs state strm =
       next_char strm not_eof (fun u ->
@@ -993,7 +993,7 @@ struct
         ) else if u = u_gt then
           S.return defs
           else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_attlist_attdef_name_state state strm =
       next_char strm not_eof (fun u ->
@@ -1006,7 +1006,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_attlist_attdef_name_state state strm
         ) else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_attlist_atttype_state state strm =
       next_char strm not_eof (fun u ->
@@ -1025,7 +1025,7 @@ struct
           consume_space strm >>= fun () ->
           S.return `NMTOKEN
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_attlist_defaultdecl state strm =
       next_char strm not_eof (fun u ->
@@ -1040,10 +1040,10 @@ struct
               consume_sequence strm [u_M; u_P; u_L; u_I; u_E; u_D] >>= fun () ->
               S.return `Implied
             ) else
-                error strm (Exn_CharToken u)
+                error ~stream:strm (Exn_CharToken u)
           )
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_after_attdef_state defs state strm =
       next_char strm not_eof (fun u ->
@@ -1052,7 +1052,7 @@ struct
         else if u = u_gt then
           S.return defs
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_entity_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -1065,7 +1065,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_entity_gedecl_state doctype state strm
         ) else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_entity_pedecl_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -1075,7 +1075,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_entity_pedecl_name_state doctype state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_entity_pedecl_name_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -1086,7 +1086,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_entity_pedecl_name_state doctype state strm
         ) else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and before_doctype_pedef_state doctype name state strm =
       next_char strm not_eof (fun u ->
@@ -1116,7 +1116,7 @@ struct
                                       (`ExternalID (PublicID (public, system)))))
             :: doctype.dtd} state strm
         ) else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_entityvalue_state lim state strm =
       next_char strm not_eof (fun u ->
@@ -1138,7 +1138,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_entity_gedecl_state doctype state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_gedecl_entitydef_state doctype name state strm =
       next_char strm not_eof (fun u ->
@@ -1170,7 +1170,7 @@ struct
                                                    notion))) :: doctype.dtd}
             state strm
         ) else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
     and doctype_gedecl_notion_state state strm =
       next_char strm not_eof (fun u ->
@@ -1179,7 +1179,7 @@ struct
         else if u = u_gt then
           S.return None
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_gedecl_notion_space_state state strm =
       next_char strm not_eof (fun u ->
@@ -1192,7 +1192,7 @@ struct
           consume_space strm >>= fun () ->
           doctype_gedecl_notion_before_name_state state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_gedecl_notion_before_name_state state strm =
       next_char strm not_eof (fun u ->
@@ -1202,7 +1202,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_gedecl_notion_name state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_gedecl_notion_name state strm =
       next_char strm not_eof (fun u ->
@@ -1213,7 +1213,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_gedecl_notion_name state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_element_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -1223,7 +1223,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_element_name_state doctype state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_element_name_state doctype state strm =
       next_char strm not_eof (fun u ->
@@ -1234,7 +1234,7 @@ struct
           add_chars state (E.encode_unicode u);
           doctype_element_name_state doctype state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and doctype_element_contentspec_state doctype name state strm =
       next_char strm not_eof (fun u ->
@@ -1250,7 +1250,7 @@ struct
             dtd = DTD_Element (name, `Any) :: doctype.dtd} state strm
         ) else
             (* TODO *)
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
       
     and doctype_markupdecl_end_state doctype state strm =
@@ -1260,7 +1260,7 @@ struct
         else if u = u_gt then
           doctype_intsubsect_state doctype state strm
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
           
     in
@@ -1275,7 +1275,7 @@ struct
           state.next_state <- PrologMiscState;
           start state strm
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
     and prolog_less_than_sign_state state strm =
       next_char strm not_eof (fun u ->
@@ -1291,7 +1291,7 @@ struct
                 state.next_state <- PrologMiscState;
                 start state strm
             ) else
-              error strm (Exn_msg "Illegal PI target")
+              error ~stream:strm (Exn_msg "Illegal PI target")
           else
             X.emit_pi target data
         ) else if u = u_excl then
@@ -1301,7 +1301,7 @@ struct
             add_chars state (E.encode_unicode u);
             start_tag_name_state state strm
           ) else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
 
     and prolog_markup_state state strm =
@@ -1314,7 +1314,7 @@ struct
           consume_space strm >>= fun () ->
           doctype_state state strm
         ) else
-            error strm (Exn_CharToken u)
+            error ~stream:strm (Exn_CharToken u)
       )
         
     in
@@ -1363,7 +1363,7 @@ struct
         comment_state state strm >>= fun () ->
         text_state state strm
       ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
     )
           
       
@@ -1381,7 +1381,7 @@ struct
         start_tag_name_state state strm
       )
         else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
     )
       
   let rec after_element_state state strm =
@@ -1398,10 +1398,10 @@ struct
               comment_state state strm >>= fun () ->
                 after_element_state state strm
             ) else
-                error strm (Exn_CharToken u)
+                error ~stream:strm (Exn_CharToken u)
           )
         ) else
-          error strm (Exn_CharToken u)
+          error ~stream:strm (Exn_CharToken u)
       )
 
   let tokenizer state strm =
