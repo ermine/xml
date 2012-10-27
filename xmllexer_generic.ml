@@ -875,6 +875,8 @@ struct
       next_char strm not_eof (fun u ->
         if is_space u then
           doctype_before_intsubsect_state doctype state strm
+        else if u = u_gt then
+          X.emit_doctype doctype
         else if u = u_lbracket then
           doctype_intsubsect_state doctype state strm
         else
