@@ -256,7 +256,6 @@ let parse_document inc =
                   loop ();
                 ) else (
                   add_element (Xmlelement el);
-                  remove_namespaces namespaces lnss;
                   loop ()
                 )
               ) else (
