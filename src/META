@@ -1,7 +1,7 @@
 # OASIS_START
-# DO NOT EDIT (digest: 6c7b4ffe1a63afa880d8e1387cf46f09)
+# DO NOT EDIT (digest: f5aec5760816ca2b2d6acdcf40554372)
 version = "0.3"
-description = "Xml parser for discrete data"
+description = "XML Stream parser"
 archive(byte) = "erm_xml.cma"
 archive(byte, plugin) = "erm_xml.cma"
 archive(native) = "erm_xml.cmxa"

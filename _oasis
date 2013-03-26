@@ -8,9 +8,9 @@ LicenseFile: LICENCE
 Plugins:     DevFiles (0.2), META (0.2)
 BuildTools:  ocamlbuild
 
-Synopsis:    Xml parser for discrete data
+Synopsis:    XML Stream parser
 Description:
-  TODO
+  XML Stream parser
 
 Flag testing
   Description: Compile tests
@@ -25,7 +25,7 @@ Flag lwt
   Default: false
 
 Library erm_xml
-  Path:       .
+  Path:       src
   Modules:    Xml, Xmllexer_generic, Xmllexer, XmllexerI, XmllexerI2, 
               XmllexerE,
               Light_xml
