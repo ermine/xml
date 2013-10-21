@@ -385,14 +385,14 @@ struct
 
   type d =
     | N of (int * d) list
-    | L of char list
+    | L of int
 
   let entities = N [
-    u_a, N [u_m, N [u_p, N [u_semicolon, L ['&']]];
-            u_p, N [u_o, N [u_s, N [u_semicolon, L ['\'']]]]];
-    u_g, N [u_t, N [u_semicolon, L ['>']]];
-    u_l, N [u_t, N [u_semicolon, L ['<']]];
-    u_q, N [u_u, N [u_o, N [u_t, N [u_semicolon, L ['"']]]]];
+    u_a, N [u_m, N [u_p, N [u_semicolon, L u_amp]];
+            u_p, N [u_o, N [u_s, N [u_semicolon, L u_apos]]]];
+    u_g, N [u_t, N [u_semicolon, L u_gt]];
+    u_l, N [u_t, N [u_semicolon, L u_lt]];
+    u_q, N [u_u, N [u_o, N [u_t, N [u_semicolon, L u_quot]]]];
   ]
 
   let character_reference strm =
@@ -400,7 +400,7 @@ struct
       | N [] -> error ~stream:strm (Exn_CharToken u)
       | N ((c, L z) :: rest) ->
         if u = c then
-          S.return u
+          S.return z
         else
           aux_entity u (N rest)
       | N ((c, t) :: rest) ->
@@ -410,8 +410,8 @@ struct
              )
            else
              aux_entity u (N rest)
-      | L c ->
-        S.return u
+      | L z ->
+        S.return z
     in
       next_char strm not_eof (fun u ->
         if u = u_sharp then (
