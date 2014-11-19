@@ -1,5 +1,5 @@
 (*
- * (c) 2007-2012 Anastasia Gornostaeva
+ * (c) 2007-2014 Anastasia Gornostaeva
  *)
 
 module type MONAD =
@@ -385,33 +385,29 @@ struct
 
   type d =
     | N of (int * d) list
-    | L of char list
+    | L of int
 
   let entities = N [
-    u_a, N [u_m, N [u_p, N [u_semicolon, L ['&']]];
-            u_p, N [u_o, N [u_s, N [u_semicolon, L ['\'']]]]];
-    u_g, N [u_t, N [u_semicolon, L ['>']]];
-    u_l, N [u_t, N [u_semicolon, L ['<']]];
-    u_q, N [u_u, N [u_o, N [u_t, N [u_semicolon, L ['"']]]]];
-  ]
+    u_a, N [u_m, N [u_p, N [u_semicolon, L u_amp]];
+            u_p, N [u_o, N [u_s, N [u_semicolon, L u_apos]]]];
+    u_g, N [u_t, N [u_semicolon, L u_gt]];
+    u_l, N [u_t, N [u_semicolon, L u_lt]];
+    u_q, N [u_u, N [u_o, N [u_t, N [u_semicolon, L u_quot]]]];
+                   ]
 
   let character_reference strm =
     let rec aux_entity u = function
       | N [] -> error ~stream:strm (Exn_CharToken u)
-      | N ((c, L z) :: rest) ->
-        if u = c then
-          S.return u
-        else
-          aux_entity u (N rest)
       | N ((c, t) :: rest) ->
-           if u = c then
-             next_char strm not_eof (fun u ->
-               aux_entity u t
-             )
-           else
+          if u = c then
+            match t with
+              | N _ ->
+                  next_char strm not_eof (fun u -> aux_entity u t)
+              | L _ -> aux_entity u t
+          else
              aux_entity u (N rest)
       | L c ->
-        S.return u
+        S.return c
     in
       next_char strm not_eof (fun u ->
         if u = u_sharp then (
