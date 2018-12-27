@@ -4,7 +4,7 @@ Version:     0.3
 Authors:     Anastasia Gornostaeva
 Copyrights:  (C) 2007-2012 Anastasia Gornostaeva
 License:     BSD3
-LicenseFile: LICENCE
+LicenseFile: LICENSE
 Plugins:     DevFiles (0.2), META (0.2)
 BuildTools:  ocamlbuild
 
@@ -26,7 +26,7 @@ Flag lwt
 
 Library erm_xml
   Path:       src
-  Modules:    Xml, Xmllexer_generic, Xmllexer, XmllexerI, XmllexerI2, 
+  Modules:    Xml, Xmllexer_generic, Xmllexer, XmllexerI, XmllexerI2,
               XmllexerE,
               Light_xml
 #              Light_xml
